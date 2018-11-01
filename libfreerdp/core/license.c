@@ -600,6 +600,11 @@ BOOL license_generate_hwid(rdpLicense* license)
 	const char *hostname;
 	ZeroMemory(license->HardwareId, HWID_LENGTH);
 
+	wStream s;
+	Stream_StaticInit(&s, license->HardwareId, 4);
+	Stream_Write_UINT32(&s, PLATFORMID);
+	Stream_Free(&s, TRUE);
+
 	hostname = license->rdp->settings->ClientHostname;
 	/* Allow FIPS override for use of MD5 here, really this does not have to be MD5 as we are just taking a MD5 hash of the 6 bytes of 0's(macAddress) */
 	/* and filling in the Data1-Data4 fields of the CLIENT_HARDWARE_ID structure(from MS-RDPELE section 2.2.2.3.1). This is for RDP licensing packets */
@@ -1537,8 +1542,9 @@ BOOL license_send_platform_challenge_response_packet(rdpLicense* license)
  * @param license license module
  */
 
-BOOL license_send_valid_client_error_packet(rdpLicense* license)
+BOOL license_send_valid_client_error_packet(rdpRdp* rdp)
 {
+	rdpLicense *license = rdp->license;
 	wStream* s = license_send_stream_init(license);
 	if (!s)
 		return FALSE;
