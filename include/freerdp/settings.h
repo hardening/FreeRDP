@@ -308,11 +308,24 @@ struct rdp_X509CertChain
 };
 typedef struct rdp_X509CertChain rdpX509CertChain;
 
+struct rdp_certDn {
+	WCHAR *countryName;
+	WCHAR *stateOrProvinceName;
+	WCHAR *localityName;
+	WCHAR *organizationName;
+	WCHAR *organizationUnitName;
+	WCHAR *commonName;
+};
+typedef struct rdp_certDn rdpCertDn;
+
 struct rdp_CertInfo
 {
 	BYTE* Modulus;
 	DWORD ModulusLength;
 	BYTE exponent[4];
+	UINT32 version;
+	rdpCertDn *issuer;
+	rdpCertDn *subject;
 };
 typedef struct rdp_CertInfo rdpCertInfo;
 

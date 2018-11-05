@@ -97,6 +97,16 @@ size_t _ber_sizeof_length(size_t length)
 	return 1;
 }
 
+BOOL ber_read_universal_tag_and_length(wStream* s, BYTE *tag, size_t *length)
+{
+	if (Stream_GetRemainingLength(s) < 1)
+		return FALSE;
+
+	Stream_Read_UINT8(s, *tag);
+
+	return ber_read_length(s, length);
+}
+
 /**
  * Read BER Universal tag.
  * @param s stream
@@ -228,6 +238,21 @@ size_t ber_write_contextual_tag(wStream* s, BYTE tag, size_t length, BOOL pc)
 size_t ber_sizeof_contextual_tag(size_t length)
 {
 	return 1 + _ber_sizeof_length(length);
+}
+
+BOOL ber_read_set_tag(wStream* s, size_t* length)
+{
+	BYTE byte;
+
+	if (Stream_GetRemainingLength(s) < 1)
+		return FALSE;
+
+	Stream_Read_UINT8(s, byte);
+
+	if (byte != ((BER_CLASS_UNIV | BER_CONSTRUCT) | (BER_TAG_SET_OF)))
+		return FALSE;
+
+	return ber_read_length(s, length);
 }
 
 BOOL ber_read_sequence_tag(wStream* s, size_t* length)
@@ -509,3 +534,26 @@ BOOL ber_read_integer_length(wStream* s, size_t* length)
 	    ber_read_universal_tag(s, BER_TAG_INTEGER, FALSE) &&
 	    ber_read_length(s, length);
 }
+
+BOOL ber_read_oid(wStream* s, BYTE **oid, size_t* len)
+{
+	if (!ber_read_universal_tag(s, BER_TAG_OBJECT_IDENFIER, FALSE) ||
+	    !ber_read_length(s, len) ||
+	    (Stream_GetRemainingLength(s) < *len))
+		return FALSE;
+
+	if (oid == NULL)
+	{
+		// even if we don't care the integer value, check the announced size
+		return Stream_SafeSeek(s, *len);
+	}
+
+	*oid = malloc(*len);
+	if (!*oid)
+		return FALSE;
+
+	Stream_Read(s, *oid, *len);
+	return TRUE;
+}
+
+

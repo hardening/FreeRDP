@@ -46,9 +46,14 @@
 #define BER_TAG_BIT_STRING	0x03
 #define BER_TAG_OCTET_STRING	0x04
 #define BER_TAG_OBJECT_IDENFIER	0x06
+#define BER_TAG_REAL		0x09
 #define BER_TAG_ENUMERATED	0x0A
+#define BER_TAG_UTF8STRING  0x0C
 #define BER_TAG_SEQUENCE	0x10
 #define BER_TAG_SEQUENCE_OF	0x10
+#define BER_TAG_SET			0x11
+#define BER_TAG_SET_OF		0x11
+#define BER_TAG_PRINTABLESTRING 0x13
 
 #define BER_PC(_pc)	(_pc ? BER_CONSTRUCT : BER_PRIMITIVE)
 
@@ -59,6 +64,7 @@ extern "C" {
 FREERDP_API BOOL ber_read_length(wStream* s, size_t* length);
 FREERDP_API size_t ber_write_length(wStream* s, size_t length);
 FREERDP_API size_t _ber_sizeof_length(size_t length);
+FREERDP_API BOOL ber_read_universal_tag_and_length(wStream* s, BYTE *tag, size_t *length);
 FREERDP_API BOOL ber_read_universal_tag(wStream* s, BYTE tag, BOOL pc);
 FREERDP_API size_t ber_write_universal_tag(wStream* s, BYTE tag, BOOL pc);
 FREERDP_API BOOL ber_read_application_tag(wStream* s, BYTE tag, size_t* length);
@@ -69,6 +75,7 @@ FREERDP_API BOOL ber_read_contextual_tag(wStream* s, BYTE tag, size_t* length, B
 FREERDP_API size_t ber_write_contextual_tag(wStream* s, BYTE tag, size_t length, BOOL pc);
 FREERDP_API size_t ber_sizeof_contextual_tag(size_t length);
 FREERDP_API BOOL ber_read_sequence_tag(wStream* s, size_t* length);
+FREERDP_API BOOL ber_read_set_tag(wStream* s, size_t* length);
 FREERDP_API size_t ber_write_sequence_tag(wStream* s, size_t length);
 FREERDP_API size_t ber_sizeof_sequence(size_t length);
 FREERDP_API size_t ber_sizeof_sequence_tag(size_t length);
@@ -83,6 +90,7 @@ FREERDP_API BOOL ber_read_integer(wStream* s, UINT32* value);
 FREERDP_API size_t ber_write_integer(wStream* s, UINT32 value);
 FREERDP_API BOOL ber_read_integer_length(wStream* s, size_t* length);
 FREERDP_API size_t ber_sizeof_integer(UINT32 value);
+FREERDP_API BOOL ber_read_oid(wStream* s, BYTE **oid, size_t* len);
 
 #ifdef __cplusplus
 }

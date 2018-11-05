@@ -151,6 +151,112 @@ static const char* certificate_read_errors[] =
 	"publicExponent"
 };
 
+static BYTE commonName_oid[] = { 0x55, 0x04, 0x03 };
+static BYTE countryName_oid[] = { 0x55, 0x04, 0x06 };
+static BYTE stateOrProvinceName_oid[] = { 0x55, 0x04, 0x08 };
+static BYTE localityName_oid[] = { 0x55, 0x04, 0x07 };
+static BYTE organizationName_oid[] = { 0x55, 0x04, 0x0a };
+static BYTE organizationUnitName_oid[] = { 0x55, 0x04, 0x0b };
+
+static BYTE sha256WithRSAEncryption_oid[] = { 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B };
+static BYTE rsaEncryption_oid[] =           { 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01 };
+
+
+static rdpCertDn *certificate_read_DN(wStream *s)
+{
+	size_t length;
+	wStream setStream;
+	wStream sequenceStream;
+	WCHAR **target;
+
+	rdpCertDn *ret = (rdpCertDn *)calloc(1, sizeof(*ret));
+	if (!ret)
+		return NULL;
+
+	while (Stream_GetRemainingLength(s))
+	{
+		BYTE *oid = NULL;
+		size_t len, setLength;
+
+		/* Set */
+		if (!ber_read_set_tag(s, &setLength))
+			goto out_error;
+
+		if (Stream_GetRemainingLength(s) < setLength)
+			goto out_error;
+
+		/* Sequence (expected with 2 elements) */
+		Stream_StaticInit(&setStream, Stream_Pointer(s), setLength);
+		if (!ber_read_sequence_tag(&setStream, &length))
+			goto out_error;
+
+		if (Stream_GetRemainingLength(&setStream) < length)
+			goto out_error;
+
+		Stream_StaticInit(&sequenceStream, Stream_Pointer(&setStream), length);
+
+		/* object identifier */
+		if (!ber_read_oid(&sequenceStream, &oid, &len))
+			return FALSE;
+
+		target = NULL;
+		switch(len) /* oids sorted by length */
+		{
+		case 3:
+			if (memcmp(countryName_oid, oid, 3) == 0)
+				target = &ret->countryName;
+			else if (memcmp(stateOrProvinceName_oid, oid, 3) == 0)
+				target = &ret->stateOrProvinceName;
+			else if (memcmp(localityName_oid, oid, 3) == 0)
+				target = &ret->localityName;
+			else if (memcmp(organizationName_oid, oid, 3) == 0)
+				target = &ret->organizationName;
+			else if (memcmp(organizationUnitName_oid, oid, 3) == 0)
+				target = &ret->organizationUnitName;
+			else if (memcmp(commonName_oid, oid, 3) == 0)
+				target = &ret->commonName;
+			break;
+		default:
+			break;
+		}
+		Stream_Seek(s, setLength);
+
+		if (!target)
+		{
+			WLog_ERR(TAG, "unknown oid");
+			winpr_HexDump(TAG, WLOG_ERROR, oid, len);
+			free(oid);
+			continue;
+		}
+
+		free(oid);
+
+		/* value */
+		BYTE tag;
+		if (!ber_read_universal_tag_and_length(&sequenceStream, &tag, &len))
+			goto out_error;
+
+		if (Stream_GetRemainingLength(&sequenceStream) < len)
+			goto out_error;
+
+		switch (tag)
+		{
+		case BER_TAG_PRINTABLESTRING:
+		case BER_TAG_UTF8STRING:
+			if (ConvertToUnicode(CP_UTF8, 0, (char *)Stream_Pointer(&sequenceStream), len, target, 0) <= 0)
+			{
+				goto out_error;
+			}
+			break;
+		default:
+			break;
+		}
+	}
+	return ret;
+
+out_error:
+	return NULL;
+}
 
 /**
  * Read X.509 Certificate
@@ -158,12 +264,12 @@ static const char* certificate_read_errors[] =
  * @param cert X.509 certificate
  */
 
-static BOOL certificate_read_x509_certificate(rdpCertBlob* cert, rdpCertInfo* info)
+/*static*/ BOOL certificate_read_x509_certificate(rdpCertBlob* cert, rdpCertInfo* info)
 {
-	wStream* s;
+	wStream staticStream, *s = &staticStream;
+	wStream subStream;
 	size_t length;
 	BYTE padding;
-	UINT32 version;
 	size_t modulus_length;
 	size_t exponent_length;
 	int error = 0;
@@ -172,7 +278,7 @@ static BOOL certificate_read_x509_certificate(rdpCertBlob* cert, rdpCertInfo* in
 		return FALSE;
 
 	memset(info, 0, sizeof(rdpCertInfo));
-	s = Stream_New(cert->data, cert->length);
+	Stream_StaticInit(s, cert->data, cert->length);
 
 	if (!s)
 		return FALSE;
@@ -194,11 +300,11 @@ static BOOL certificate_read_x509_certificate(rdpCertBlob* cert, rdpCertInfo* in
 
 	error++;
 
-	if (!ber_read_integer(s, &version)) /* version (INTEGER) */
+	if (!ber_read_integer(s, &info->version)) /* version (INTEGER) */
 		goto error1;
 
 	error++;
-	version++;
+	info->version++;
 
 	/* serialNumber */
 	if (!ber_read_integer(s, NULL)) /* CertificateSerialNumber (INTEGER) */
@@ -214,9 +320,14 @@ static BOOL certificate_read_x509_certificate(rdpCertBlob* cert, rdpCertInfo* in
 	error++;
 
 	/* issuer */
-	if (!ber_read_sequence_tag(s, &length) || !Stream_SafeSeek(s, length)) /* Name (SEQUENCE) */
+	if (!ber_read_sequence_tag(s, &length) || (Stream_GetRemainingLength(s) < length)) /* Name (SEQUENCE) */
 		goto error1;
 
+	Stream_StaticInit(&subStream, Stream_Pointer(s), length);
+	info->issuer = certificate_read_DN(&subStream);
+	if (!info->issuer)
+		goto error1;
+	Stream_Seek(s, length);
 	error++;
 
 	/* validity */
@@ -226,9 +337,14 @@ static BOOL certificate_read_x509_certificate(rdpCertBlob* cert, rdpCertInfo* in
 	error++;
 
 	/* subject */
-	if (!ber_read_sequence_tag(s, &length) || !Stream_SafeSeek(s, length)) /* Name (SEQUENCE) */
+	if (!ber_read_sequence_tag(s, &length) || (Stream_GetRemainingLength(s) < length)) /* Name (SEQUENCE) */
 		goto error1;
 
+	Stream_StaticInit(&subStream, Stream_Pointer(s), length);
+	info->subject = certificate_read_DN(&subStream);
+	if (!info->subject)
+		goto error1;
+	Stream_Seek(s, length);
 	error++;
 
 	/* subjectPublicKeyInfo */
@@ -304,7 +420,6 @@ static BOOL certificate_read_x509_certificate(rdpCertBlob* cert, rdpCertInfo* in
 	Stream_Read(s, &info->exponent[4 - exponent_length], exponent_length);
 	crypto_reverse(info->Modulus, info->ModulusLength);
 	crypto_reverse(info->exponent, 4);
-	Stream_Free(s, FALSE);
 	return TRUE;
 error2:
 	free(info->Modulus);
@@ -312,7 +427,6 @@ error2:
 error1:
 	WLog_ERR(TAG, "error reading when reading certificate: part=%s error=%d",
 	         certificate_read_errors[error], error);
-	Stream_Free(s, FALSE);
 	return FALSE;
 }
 
