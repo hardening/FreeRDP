@@ -160,6 +160,7 @@ typedef enum
 #define TRANSPORT_TYPE_UDP_FECR 0x00000001
 #define TRANSPORT_TYPE_UDP_FECL 0x00000004
 #define TRANSPORT_TYPE_UDP_PREFERRED 0x00000100
+#define SOFTSYNC_TCP_TO_UDP 0x0000200
 
 /* Static Virtual Channel Options */
 #define CHANNEL_OPTION_INITIALIZED 0x80000000
@@ -992,7 +993,8 @@ struct rdp_settings
 	/* Client Multitransport Channel Data */
 	ALIGN64 UINT32 MultitransportFlags; /* 512 */
 	ALIGN64 BOOL SupportMultitransport; /* 513 */
-	UINT64 padding0576[576 - 514];      /* 514 */
+	ALIGN64 UINT32 RemoteMultitransportFlags; /* 514 */
+	UINT64 padding0576[576 - 515];      /* 515 */
 	UINT64 padding0640[640 - 576];      /* 576 */
 
 	/*

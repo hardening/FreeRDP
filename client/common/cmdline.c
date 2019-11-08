@@ -1008,7 +1008,8 @@ static int freerdp_client_command_line_post_filter(void* context, COMMAND_LINE_A
 
 		if (settings->SupportMultitransport)
 			settings->MultitransportFlags =
-			    (TRANSPORT_TYPE_UDP_FECR | TRANSPORT_TYPE_UDP_FECL | TRANSPORT_TYPE_UDP_PREFERRED);
+			    (TRANSPORT_TYPE_UDP_FECR | TRANSPORT_TYPE_UDP_FECL | TRANSPORT_TYPE_UDP_PREFERRED |
+			    SOFTSYNC_TCP_TO_UDP);
 		else
 			settings->MultitransportFlags = 0;
 	}

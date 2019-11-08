@@ -679,31 +679,34 @@ BOOL mcs_send_connect_initial(rdpMcs* mcs)
 	wStream* gcc_CCrq = NULL;
 	wStream* client_data = NULL;
 
-	if (!mcs)
+	if (!mcs || (mcs_initialize_client_channels(mcs, mcs->settings) < 0))
 		return FALSE;
 
-	mcs_initialize_client_channels(mcs, mcs->settings);
 	client_data = Stream_New(NULL, 512);
-
 	if (!client_data)
 	{
 		WLog_ERR(TAG, "Stream_New failed!");
 		return FALSE;
 	}
 
-	gcc_write_client_data_blocks(client_data, mcs);
-	gcc_CCrq = Stream_New(NULL, 1024);
+	if (!gcc_write_client_data_blocks(client_data, mcs))
+		return FALSE;
 
+	gcc_CCrq = Stream_New(NULL, 1024);
 	if (!gcc_CCrq)
 	{
 		WLog_ERR(TAG, "Stream_New failed!");
 		goto out;
 	}
 
-	gcc_write_conference_create_request(gcc_CCrq, client_data);
+	if (!gcc_write_conference_create_request(gcc_CCrq, client_data))
+	{
+		WLog_ERR(TAG, "gcc_write_conference_create_request failed");
+		goto out;
+	}
+
 	length = Stream_GetPosition(gcc_CCrq) + 7;
 	s = Stream_New(NULL, 1024 + length);
-
 	if (!s)
 	{
 		WLog_ERR(TAG, "Stream_New failed!");
