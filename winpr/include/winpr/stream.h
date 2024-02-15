@@ -854,7 +854,7 @@ extern "C"
 		WINPR_ASSERT(_s);
 		WINPR_ASSERT(_s->pointer);
 		WINPR_ASSERT(Stream_GetRemainingCapacity(_s) >= 2);
-		*_s->pointer++ = (_v)&0xFF;
+		*_s->pointer++ = (_v) & 0xFF;
 		*_s->pointer++ = ((_v) >> 8) & 0xFF;
 	}
 
@@ -863,7 +863,7 @@ extern "C"
 		WINPR_ASSERT(_s);
 		WINPR_ASSERT(_s->pointer);
 		WINPR_ASSERT(Stream_GetRemainingCapacity(_s) >= 2);
-		*_s->pointer++ = (_v)&0xFF;
+		*_s->pointer++ = (_v) & 0xFF;
 		*_s->pointer++ = ((_v) >> 8) & 0xFF;
 	}
 
@@ -873,7 +873,7 @@ extern "C"
 		WINPR_ASSERT(_s->pointer);
 		WINPR_ASSERT(Stream_GetRemainingCapacity(_s) >= 2);
 		*_s->pointer++ = ((_v) >> 8) & 0xFF;
-		*_s->pointer++ = (_v)&0xFF;
+		*_s->pointer++ = (_v) & 0xFF;
 	}
 
 	static INLINE void Stream_Write_UINT24_BE(wStream* _s, UINT32 _v)
@@ -884,7 +884,7 @@ extern "C"
 		WINPR_ASSERT(Stream_GetRemainingCapacity(_s) >= 3);
 		*_s->pointer++ = ((_v) >> 16) & 0xFF;
 		*_s->pointer++ = ((_v) >> 8) & 0xFF;
-		*_s->pointer++ = (_v)&0xFF;
+		*_s->pointer++ = (_v) & 0xFF;
 	}
 
 	static INLINE void Stream_Write_INT32(wStream* _s, INT32 _v)
@@ -892,7 +892,7 @@ extern "C"
 		WINPR_ASSERT(_s);
 		WINPR_ASSERT(_s->pointer);
 		WINPR_ASSERT(Stream_GetRemainingCapacity(_s) >= 4);
-		*_s->pointer++ = (_v)&0xFF;
+		*_s->pointer++ = (_v) & 0xFF;
 		*_s->pointer++ = ((_v) >> 8) & 0xFF;
 		*_s->pointer++ = ((_v) >> 16) & 0xFF;
 		*_s->pointer++ = ((_v) >> 24) & 0xFF;
@@ -903,7 +903,7 @@ extern "C"
 		WINPR_ASSERT(_s);
 		WINPR_ASSERT(_s->pointer);
 		WINPR_ASSERT(Stream_GetRemainingCapacity(_s) >= 4);
-		*_s->pointer++ = (_v)&0xFF;
+		*_s->pointer++ = (_v) & 0xFF;
 		*_s->pointer++ = ((_v) >> 8) & 0xFF;
 		*_s->pointer++ = ((_v) >> 16) & 0xFF;
 		*_s->pointer++ = ((_v) >> 24) & 0xFF;
@@ -913,7 +913,7 @@ extern "C"
 	{
 		WINPR_ASSERT(Stream_GetRemainingCapacity(_s) >= 4);
 		Stream_Write_UINT16_BE(_s, ((_v) >> 16 & 0xFFFF));
-		Stream_Write_UINT16_BE(_s, ((_v)&0xFFFF));
+		Stream_Write_UINT16_BE(_s, ((_v) & 0xFFFF));
 	}
 
 	static INLINE void Stream_Write_UINT64(wStream* _s, UINT64 _v)
@@ -921,7 +921,7 @@ extern "C"
 		WINPR_ASSERT(_s);
 		WINPR_ASSERT(_s->pointer);
 		WINPR_ASSERT(Stream_GetRemainingCapacity(_s) >= 8);
-		*_s->pointer++ = (_v)&0xFF;
+		*_s->pointer++ = (_v) & 0xFF;
 		*_s->pointer++ = (_v >> 8) & 0xFF;
 		*_s->pointer++ = (_v >> 16) & 0xFF;
 		*_s->pointer++ = (_v >> 24) & 0xFF;
@@ -930,6 +930,22 @@ extern "C"
 		*_s->pointer++ = (_v >> 48) & 0xFF;
 		*_s->pointer++ = (_v >> 56) & 0xFF;
 	}
+
+	static INLINE void Stream_Write_UINT64_BE(wStream* _s, UINT64 _v)
+	{
+		WINPR_ASSERT(_s);
+		WINPR_ASSERT(_s->pointer);
+		WINPR_ASSERT(Stream_GetRemainingCapacity(_s) >= 8);
+		*_s->pointer++ = (_v >> 56) & 0xFF;
+		*_s->pointer++ = (_v >> 48) & 0xFF;
+		*_s->pointer++ = (_v >> 40) & 0xFF;
+		*_s->pointer++ = (_v >> 32) & 0xFF;
+		*_s->pointer++ = (_v >> 24) & 0xFF;
+		*_s->pointer++ = (_v >> 16) & 0xFF;
+		*_s->pointer++ = (_v >> 8) & 0xFF;
+		*_s->pointer++ = (_v) & 0xFF;
+	}
+
 	static INLINE void Stream_Write(wStream* _s, const void* _b, size_t _n)
 	{
 		if (_n > 0)

@@ -915,6 +915,7 @@ out:
  */
 static UINT rdpear_on_open(IWTSVirtualChannelCallback* pChannelCallback)
 {
+	WINPR_UNUSED(pChannelCallback);
 
 	return CHANNEL_RC_OK;
 }
@@ -926,6 +927,8 @@ static UINT rdpear_on_open(IWTSVirtualChannelCallback* pChannelCallback)
  */
 static UINT rdpear_on_close(IWTSVirtualChannelCallback* pChannelCallback)
 {
+	WINPR_UNUSED(pChannelCallback);
+
 	UINT error = CHANNEL_RC_OK;
 	return error;
 }

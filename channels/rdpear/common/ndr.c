@@ -26,6 +26,10 @@
 
 #define TAG FREERDP_TAG("ndr")
 
+<<<<<<< HEAD
+=======
+#define NDR_MAX_STRUCT_DEFERRED 16
+>>>>>>> a23f0620a (core, channels: client-side remote credential guard)
 #define NDR_MAX_CONSTRUCTS 16
 #define NDR_MAX_DEFERRED 50
 
@@ -119,11 +123,19 @@ void ndr_context_destroy(NdrContext** pcontext)
 
 void ndr_context_bytes_read(NdrContext* context, size_t len)
 {
+<<<<<<< HEAD
+=======
+	WINPR_ASSERT(context);
+>>>>>>> a23f0620a (core, channels: client-side remote credential guard)
 	context->indentLevels[context->currentLevel] += len;
 }
 
 void ndr_context_bytes_written(NdrContext* context, size_t len)
 {
+<<<<<<< HEAD
+=======
+	WINPR_ASSERT(context);
+>>>>>>> a23f0620a (core, channels: client-side remote credential guard)
 	ndr_context_bytes_read(context, len);
 }
 
@@ -315,10 +327,6 @@ static size_t ndr_hintsCount(NdrMessageType msgType, const void* hints)
 	}
 }
 
-void Stream_Write_UINT64_BE(wStream* _s, UINT64 _v)
-{
-	WINPR_ASSERT(FALSE && "implement Stream_Write_UINT64_BE()");
-}
 
 BOOL ndr_read_uint8(NdrContext* context, wStream* s, BYTE* v)
 {
@@ -628,7 +636,10 @@ BOOL ndr_struct_read_fromDescr(NdrContext* context, wStream* s, const NdrStructD
 	WINPR_ASSERT(descr);
 	WINPR_ASSERT(target);
 
+<<<<<<< HEAD
 #define NDR_MAX_STRUCT_DEFERRED 16
+=======
+>>>>>>> a23f0620a (core, channels: client-side remote credential guard)
 	NdrDeferredEntry deferreds[NDR_MAX_STRUCT_DEFERRED] = { 0 };
 	size_t ndeferred = 0;
 
