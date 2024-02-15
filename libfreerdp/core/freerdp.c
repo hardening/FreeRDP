@@ -1223,6 +1223,26 @@ UINT32 freerdp_get_nla_sspi_error(rdpContext* context)
 	return nla_get_sspi_error(nla);
 }
 
+BOOL freerdp_nla_encrypt(rdpContext* context, const SecBuffer* inBuffer, SecBuffer* outBuffer)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->rdp);
+	WINPR_ASSERT(context->rdp->transport);
+
+	rdpNla* nla = context->rdp->nla;
+	return nla_encrypt(nla, inBuffer, outBuffer);
+}
+
+BOOL freerdp_nla_decrypt(rdpContext* context, const SecBuffer* inBuffer, SecBuffer* outBuffer)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->rdp);
+	WINPR_ASSERT(context->rdp->transport);
+
+	rdpNla* nla = context->rdp->nla;
+	return nla_decrypt(nla, inBuffer, outBuffer);
+}
+
 HANDLE getChannelErrorEventHandle(rdpContext* context)
 {
 	WINPR_ASSERT(context);
