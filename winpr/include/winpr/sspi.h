@@ -1332,6 +1332,13 @@ extern "C"
 #define SECPKG_ATTR_AUTH_NTLM_MIC 1106
 #define SECPKG_ATTR_AUTH_NTLM_MIC_VALUE 1107
 
+#define SECPKG_CRED_ATTR_TICKET_LOGON 1200
+#define SECPKG_CRED_ATTR_ENCRYPTED_LEN 1201
+#define SECPKG_CRED_ATTR_BUILD_ENCRYPTED_AUTH_DATA 1202
+#define SECPKG_CRED_ATTR_COMPUTE_TGS_CHECKSUM 1203
+#define SECPKG_CRED_ATTR_CREATE_AP_REQ_AUTH 1204
+#define SECPKG_CRED_ATTR_UNPACK_REPLY_BODY 1205
+
 	typedef struct
 	{
 		char User[256 + 1];
@@ -1371,6 +1378,67 @@ extern "C"
 		UINT32 length;
 		BYTE* buffer;
 	} SecPkgContext_AuthNtlmMessage;
+
+	typedef struct
+	{
+		UINT32 encType;
+		UINT32 plainLen;
+		UINT32 encodedLen;
+	} SecPkgContext_KerbEncryptedLen;
+
+	typedef struct
+	{
+		UINT32 encType;
+		BYTE* key;
+		UINT32 keyLen;
+	} SecPkgContext_Key;
+
+	typedef struct
+	{
+		BYTE* data;
+		UINT32 len;
+	} SecPkgContext_Asn1Data;
+
+	typedef struct
+	{
+		UINT32 keyUsage;
+		SecPkgContext_Asn1Data plain;
+		SecPkgContext_Asn1Data encrypted;
+	} SecPkgContext_KerbBuildEncryptedAuthData;
+
+	typedef struct
+	{
+		SecPkgContext_Asn1Data requestBody;
+		UINT32 checksumType;
+		SecPkgContext_Asn1Data checksum;
+	} SecPkgContext_ComputeTgsChecksum;
+
+	typedef struct
+	{
+		UINT32 seqNumber;
+		char *clientName;
+		char *realm;
+		UINT64 skewTime;
+		SecPkgContext_Asn1Data authData;
+		SecPkgContext_Asn1Data checksum;
+		UINT32 keyUsage;
+
+		UINT64 authenticatorTime;
+		SecPkgContext_Asn1Data authenticator;
+		UINT32 kerbProtocolError;
+	} SecPkgContext_CreateApReqAuthenticator;
+
+	typedef struct
+	{
+		SecPkgContext_Asn1Data encryptedData;
+		// KERB_RPC_ENCRYPTION_KEY* Key;
+		// KERB_RPC_ENCRYPTION_KEY* StrengthenKey;
+		UINT32 keyUsage;
+
+		SecPkgContext_Asn1Data replyBody;
+		UINT32 KerbProtocolError;
+	} SecPkgContext_UnpackKdcReplyBody;
+
 
 #define SSPI_INTERFACE_WINPR 0x00000001
 #define SSPI_INTERFACE_NATIVE 0x00000002

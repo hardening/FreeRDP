@@ -659,6 +659,10 @@ owned by rdpRdp */
 	FREERDP_API BOOL freerdp_nla_revert_to_self(rdpContext* context);
 
 	FREERDP_API UINT32 freerdp_get_nla_sspi_error(rdpContext* context);
+	FREERDP_API BOOL freerdp_nla_encrypt(rdpContext* context, const SecBuffer *inBuffer, SecBuffer *outBuffer);
+	FREERDP_API BOOL freerdp_nla_decrypt(rdpContext* context, const SecBuffer *inBuffer, SecBuffer *outBuffer);
+	FREERDP_API SECURITY_STATUS freerdp_nla_setKerbAttribute(rdpContext* context, DWORD ulAttr, PVOID pBuffer);
+
 
 	FREERDP_API void clearChannelError(rdpContext* context);
 	FREERDP_API HANDLE getChannelErrorEventHandle(rdpContext* context);
