@@ -1793,10 +1793,6 @@ error:
 static UINT drdynvc_virtual_channel_event_connected(drdynvcPlugin* drdynvc, LPVOID pData,
                                                     UINT32 dataLength)
 {
-	UINT error = 0;
-	UINT32 status = 0;
-	rdpSettings* settings = nullptr;
-
 	WINPR_ASSERT(drdynvc);
 	WINPR_UNUSED(pData);
 	WINPR_UNUSED(dataLength);
@@ -1805,7 +1801,7 @@ static UINT drdynvc_virtual_channel_event_connected(drdynvcPlugin* drdynvc, LPVO
 		return CHANNEL_RC_BAD_CHANNEL_HANDLE;
 
 	WINPR_ASSERT(drdynvc->channelEntryPoints.pVirtualChannelOpenEx);
-	status = drdynvc->channelEntryPoints.pVirtualChannelOpenEx(
+	UINT32 status = drdynvc->channelEntryPoints.pVirtualChannelOpenEx(
 	    drdynvc->InitHandle, &drdynvc->OpenHandle, drdynvc->channelDef.name,
 	    drdynvc_virtual_channel_open_event_ex);
 
@@ -1817,9 +1813,10 @@ static UINT drdynvc_virtual_channel_event_connected(drdynvcPlugin* drdynvc, LPVO
 	}
 
 	WINPR_ASSERT(drdynvc->rdpcontext);
-	settings = drdynvc->rdpcontext->settings;
+	rdpSettings*settings = drdynvc->rdpcontext->settings;
 	WINPR_ASSERT(settings);
 
+	UINT error = CHANNEL_RC_OK;
 	for (UINT32 index = 0;
 	     index < freerdp_settings_get_uint32(settings, FreeRDP_DynamicChannelCount); index++)
 	{
@@ -1831,7 +1828,8 @@ static UINT drdynvc_virtual_channel_event_connected(drdynvcPlugin* drdynvc, LPVO
 			goto error;
 	}
 
-	if ((error = dvcman_init(drdynvc, drdynvc->channel_mgr)))
+	error = dvcman_init(drdynvc, drdynvc->channel_mgr);
+	if (error != CHANNEL_RC_OK)
 	{
 		WLog_Print(drdynvc->log, WLOG_ERROR, "dvcman_init failed with error %" PRIu32 "!", error);
 		goto error;
@@ -2142,17 +2140,14 @@ FREERDP_ENTRY_POINT(BOOL VCAPITYPE VirtualChannelEntryEx(PCHANNEL_ENTRY_POINTS_E
 		drdynvc->context = context;
 		context->GetVersion = drdynvc_get_version;
 		drdynvc->rdpcontext = pEntryPointsEx->context;
-		if (!freerdp_settings_get_bool(drdynvc->rdpcontext->settings,
-		                               FreeRDP_TransportDumpReplay) &&
-		    !freerdp_settings_get_bool(drdynvc->rdpcontext->settings,
-		                               FreeRDP_SynchronousDynamicChannels))
+		if (!freerdp_settings_get_bool(drdynvc->rdpcontext->settings, FreeRDP_TransportDumpReplay) &&
+		    !freerdp_settings_get_bool(drdynvc->rdpcontext->settings, FreeRDP_SynchronousDynamicChannels))
 			drdynvc->async = TRUE;
 	}
 
 	drdynvc->log = WLog_Get(TAG);
 	WLog_Print(drdynvc->log, WLOG_DEBUG, "VirtualChannelEntryEx");
-	CopyMemory(&(drdynvc->channelEntryPoints), pEntryPoints,
-	           sizeof(CHANNEL_ENTRY_POINTS_FREERDP_EX));
+	CopyMemory(&(drdynvc->channelEntryPoints), pEntryPoints, sizeof(CHANNEL_ENTRY_POINTS_FREERDP_EX));
 	drdynvc->InitHandle = pInitHandle;
 
 	WINPR_ASSERT(drdynvc->channelEntryPoints.pVirtualChannelInitEx);
