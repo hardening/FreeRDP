@@ -29,6 +29,9 @@ extern "C"
 {
 #endif
 
+/* [MS-RDPESC] 3.2.5.1: the output buffer length SHOULD be set to 2048 */
+#define SCARD_IOCTL_MAX_OUTPUT_BUFFER_LENGTH 2048
+
 #define RDP_SCARD_CTL_CODE(code) \
 	CTL_CODE(FILE_DEVICE_FILE_SYSTEM, (code), METHOD_BUFFERED, FILE_ANY_ACCESS)
 

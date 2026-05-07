@@ -1648,7 +1648,8 @@ LONG smartcard_irp_device_control_call(scard_call_context* ctx, wStream* out, NT
 	 * Since it's a SHOULD and not a MUST, we don't care
 	 * about it, but we still reserve at least 2048 bytes.
 	 */
-	const size_t outMaxLen = MAX(2048, operation->outputBufferLength);
+	const size_t outMaxLen =
+	    MAX(SCARD_IOCTL_MAX_OUTPUT_BUFFER_LENGTH, operation->outputBufferLength);
 	if (!Stream_EnsureRemainingCapacity(out, outMaxLen))
 		return SCARD_E_NO_MEMORY;
 
