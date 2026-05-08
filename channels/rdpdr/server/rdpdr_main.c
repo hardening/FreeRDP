@@ -32,6 +32,8 @@
 #include <winpr/stream.h>
 
 #include <freerdp/channels/log.h>
+#include <freerdp/channels/scard.h>
+#include <freerdp/utils/smartcard_operations.h>
 #include "rdpdr_main.h"
 
 #define RDPDR_ADD_PRINTER_EVENT 0x00000001
@@ -2674,6 +2676,46 @@ static UINT rdpdr_server_send_device_file_rename_request(RdpdrServerContext* con
 	return rdpdr_seal_send_free_request(context, s);
 }
 
+static UINT rdpdr_server_send_device_control_request(RdpdrServerContext* context, UINT32 deviceId,
+                                                     UINT32 completionId, UINT32 ioControlCode,
+                                                     UINT32 outputBufferLength,
+                                                     const void* inputBuffer,
+                                                     UINT32 inputBufferLength)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(inputBuffer || (inputBufferLength == 0));
+
+	WLog_Print(context->priv->log, WLOG_DEBUG,
+	           "RdpdrServerSendDeviceControlRequest: deviceId=%" PRIu32 ","
+	           " ioControlCode=0x%" PRIx32 ", inputBufferLength=%" PRIu32,
+	           deviceId, ioControlCode, inputBufferLength);
+
+	if (inputBufferLength > 0)
+		winpr_HexLogDump(context->priv->log, WLOG_DEBUG, inputBuffer, inputBufferLength);
+
+	wStream* s =
+	    Stream_New(nullptr, RDPDR_HEADER_LENGTH + RDPDR_DEVICE_IO_REQUEST_LENGTH +
+	                            RDPDR_DEVICE_IO_CONTROL_REQ_HDR_LENGTH + inputBufferLength);
+
+	if (!s)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "Stream_New failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	rdpdr_server_write_device_iorequest(s, deviceId, 0, completionId, IRP_MJ_DEVICE_CONTROL, 0);
+	Stream_Write_UINT32(s, outputBufferLength); /* OutputBufferLength (4 bytes) */
+	Stream_Write_UINT32(s, inputBufferLength);  /* InputBufferLength (4 bytes) */
+	Stream_Write_UINT32(s, ioControlCode);      /* IoControlCode (4 bytes) */
+	Stream_Zero(s, 20);                         /* Padding (20 bytes) */
+
+	if (inputBufferLength > 0)
+		Stream_Write(s, inputBuffer, inputBufferLength);
+
+	return rdpdr_seal_send_free_request(context, s);
+}
+
 static void rdpdr_server_convert_slashes(char* path, int size)
 {
 	WINPR_ASSERT(path || (size <= 0));
@@ -3743,6 +3785,917 @@ fail:
 	return nullptr;
 }
 
+static UINT rdpdr_server_smartcard_establish_context_callback(RdpdrServerContext* context,
+                                                              wStream* s, RDPDR_IRP* irp,
+                                                              UINT32 deviceId, UINT32 completionId,
+                                                              UINT32 ioStatus)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(s);
+	WINPR_ASSERT(irp);
+
+	WLog_Print(context->priv->log, WLOG_DEBUG,
+	           "RdpdrServerSmartcardEstablishContextCallback: deviceId=%" PRIu32
+	           ", completionId=%" PRIu32 ", ioStatus=0x%" PRIx32 "",
+	           deviceId, completionId, ioStatus);
+
+	if (ioStatus != STATUS_SUCCESS)
+	{
+		if (context->OnSmartcardEstablishContextComplete)
+			context->OnSmartcardEstablishContextComplete(context, irp->CallbackData, ioStatus,
+			                                             SCARD_F_INTERNAL_ERROR, nullptr);
+		rdpdr_server_irp_free(irp);
+		return CHANNEL_RC_OK;
+	}
+
+	SMARTCARD_OPERATION op = WINPR_C_ARRAY_INIT;
+	LONG status =
+	    smartcard_irp_device_control_decode_response(s, SCARD_IOCTL_ESTABLISHCONTEXT, &op);
+	if (status != SCARD_S_SUCCESS)
+	{
+		smartcard_operation_free(&op, FALSE);
+		rdpdr_server_irp_free(irp);
+		return ERROR_INVALID_DATA;
+	}
+
+	if (context->OnSmartcardEstablishContextComplete)
+		context->OnSmartcardEstablishContextComplete(context, irp->CallbackData, ioStatus,
+		                                             op.returnCode, &op.ret.establishContext);
+
+	smartcard_operation_free(&op, FALSE);
+	rdpdr_server_irp_free(irp);
+	return CHANNEL_RC_OK;
+}
+
+static UINT rdpdr_server_smartcard_establish_context(RdpdrServerContext* context,
+                                                     void* callbackData, UINT32 deviceId,
+                                                     UINT32 dwScope)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(callbackData);
+
+	if ((dwScope != SCARD_SCOPE_USER) && (dwScope != SCARD_SCOPE_TERMINAL) &&
+	    (dwScope != SCARD_SCOPE_SYSTEM))
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "invalid dwScope=0x%08" PRIx32, dwScope);
+		return ERROR_INVALID_PARAMETER;
+	}
+
+	RDPDR_IRP* irp = rdpdr_server_irp_new();
+	if (!irp)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "rdpdr_server_irp_new failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	irp->CompletionId = context->priv->NextCompletionId++;
+	irp->Callback = rdpdr_server_smartcard_establish_context_callback;
+	irp->CallbackData = callbackData;
+	irp->DeviceId = deviceId;
+
+	if (!rdpdr_server_enqueue_irp(context, irp))
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "rdpdr_server_enqueue_irp failed!");
+		rdpdr_server_irp_free(irp);
+		return ERROR_INTERNAL_ERROR;
+	}
+
+	SMARTCARD_OPERATION op = WINPR_C_ARRAY_INIT;
+	op.ioControlCode = SCARD_IOCTL_ESTABLISHCONTEXT;
+	op.call.establishContext.dwScope = dwScope;
+
+	wStream* s = Stream_New(nullptr, 64);
+	if (!s)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "Stream_New failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	LONG status = smartcard_irp_device_control_encode_request(s, &op);
+	if (status != SCARD_S_SUCCESS)
+	{
+		Stream_Free(s, TRUE);
+		return (UINT)status;
+	}
+
+	const UINT error = rdpdr_server_send_device_control_request(
+	    context, deviceId, irp->CompletionId, SCARD_IOCTL_ESTABLISHCONTEXT,
+	    SCARD_IOCTL_MAX_OUTPUT_BUFFER_LENGTH, Stream_Buffer(s), (UINT32)Stream_Length(s));
+
+	Stream_Free(s, TRUE);
+	return error;
+}
+
+/* ListReaders */
+static UINT rdpdr_server_smartcard_list_readers_callback(RdpdrServerContext* context, wStream* s,
+                                                         RDPDR_IRP* irp, UINT32 deviceId,
+                                                         UINT32 completionId, UINT32 ioStatus)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(s);
+	WINPR_ASSERT(irp);
+
+	WLog_Print(context->priv->log, WLOG_DEBUG,
+	           "SmartcardListReadersCallback: deviceId=%" PRIu32 ", completionId=%" PRIu32
+	           ", ioStatus=0x%" PRIx32,
+	           deviceId, completionId, ioStatus);
+
+	if (ioStatus != STATUS_SUCCESS)
+	{
+		if (context->OnSmartcardListReadersComplete)
+			context->OnSmartcardListReadersComplete(context, irp->CallbackData, ioStatus,
+			                                        SCARD_F_INTERNAL_ERROR, nullptr);
+		rdpdr_server_irp_free(irp);
+		return CHANNEL_RC_OK;
+	}
+
+	SMARTCARD_OPERATION op = WINPR_C_ARRAY_INIT;
+	LONG status = smartcard_irp_device_control_decode_response(s, SCARD_IOCTL_LISTREADERSW, &op);
+	if (status != SCARD_S_SUCCESS)
+	{
+		smartcard_operation_free(&op, FALSE);
+		rdpdr_server_irp_free(irp);
+		return ERROR_INVALID_DATA;
+	}
+
+	if (context->OnSmartcardListReadersComplete)
+		context->OnSmartcardListReadersComplete(context, irp->CallbackData, ioStatus, op.returnCode,
+		                                        &op.ret.listReaders);
+
+	smartcard_operation_free(&op, FALSE);
+	rdpdr_server_irp_free(irp);
+	return CHANNEL_RC_OK;
+}
+
+static UINT rdpdr_server_smartcard_list_readers(RdpdrServerContext* context, void* callbackData,
+                                                UINT32 deviceId, const REDIR_SCARDCONTEXT* hContext,
+                                                UINT32 cchReaders)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(callbackData);
+	WINPR_ASSERT(hContext);
+
+	RDPDR_IRP* irp = rdpdr_server_irp_new();
+	if (!irp)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "rdpdr_server_irp_new failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	irp->CompletionId = context->priv->NextCompletionId++;
+	irp->Callback = rdpdr_server_smartcard_list_readers_callback;
+	irp->CallbackData = callbackData;
+	irp->DeviceId = deviceId;
+
+	if (!rdpdr_server_enqueue_irp(context, irp))
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "rdpdr_server_enqueue_irp failed!");
+		rdpdr_server_irp_free(irp);
+		return ERROR_INTERNAL_ERROR;
+	}
+
+	SMARTCARD_OPERATION op = WINPR_C_ARRAY_INIT;
+	op.ioControlCode = SCARD_IOCTL_LISTREADERSW;
+	op.call.listReaders.handles.hContext = *hContext;
+	op.call.listReaders.cBytes = 0;
+	op.call.listReaders.mszGroups = nullptr;
+	op.call.listReaders.fmszReadersIsNULL = 0;
+	op.call.listReaders.cchReaders = cchReaders;
+
+	wStream* s = Stream_New(nullptr, 256);
+	if (!s)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "Stream_New failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	LONG status = smartcard_irp_device_control_encode_request(s, &op);
+	if (status != SCARD_S_SUCCESS)
+	{
+		Stream_Free(s, TRUE);
+		return (UINT)status;
+	}
+
+	const UINT error = rdpdr_server_send_device_control_request(
+	    context, deviceId, irp->CompletionId, SCARD_IOCTL_LISTREADERSW,
+	    SCARD_IOCTL_MAX_OUTPUT_BUFFER_LENGTH, Stream_Buffer(s), (UINT32)Stream_Length(s));
+
+	Stream_Free(s, TRUE);
+	return error;
+}
+
+/* GetStatusChange */
+static UINT rdpdr_server_smartcard_get_status_change_callback(RdpdrServerContext* context,
+                                                              wStream* s, RDPDR_IRP* irp,
+                                                              UINT32 deviceId, UINT32 completionId,
+                                                              UINT32 ioStatus)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(s);
+	WINPR_ASSERT(irp);
+
+	WLog_Print(context->priv->log, WLOG_DEBUG,
+	           "SmartcardGetStatusChangeCallback: deviceId=%" PRIu32 ", completionId=%" PRIu32
+	           ", ioStatus=0x%" PRIx32,
+	           deviceId, completionId, ioStatus);
+
+	if (ioStatus != STATUS_SUCCESS)
+	{
+		if (context->OnSmartcardGetStatusChangeComplete)
+			context->OnSmartcardGetStatusChangeComplete(context, irp->CallbackData, ioStatus,
+			                                            SCARD_F_INTERNAL_ERROR, nullptr);
+		rdpdr_server_irp_free(irp);
+		return CHANNEL_RC_OK;
+	}
+
+	SMARTCARD_OPERATION op = WINPR_C_ARRAY_INIT;
+	LONG status =
+	    smartcard_irp_device_control_decode_response(s, SCARD_IOCTL_GETSTATUSCHANGEW, &op);
+	if (status != SCARD_S_SUCCESS)
+	{
+		smartcard_operation_free(&op, FALSE);
+		rdpdr_server_irp_free(irp);
+		return ERROR_INVALID_DATA;
+	}
+
+	if (context->OnSmartcardGetStatusChangeComplete)
+		context->OnSmartcardGetStatusChangeComplete(context, irp->CallbackData, ioStatus,
+		                                            op.returnCode, &op.ret.getStatusChange);
+
+	smartcard_operation_free(&op, FALSE);
+	rdpdr_server_irp_free(irp);
+	return CHANNEL_RC_OK;
+}
+
+static UINT rdpdr_server_smartcard_get_status_change(RdpdrServerContext* context,
+                                                     void* callbackData, UINT32 deviceId,
+                                                     const REDIR_SCARDCONTEXT* hContext,
+                                                     UINT32 dwTimeOut, UINT32 cReaders,
+                                                     const SCARD_READERSTATEW* rgReaderStates)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(callbackData);
+	WINPR_ASSERT(hContext);
+
+	RDPDR_IRP* irp = rdpdr_server_irp_new();
+	if (!irp)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "rdpdr_server_irp_new failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	irp->CompletionId = context->priv->NextCompletionId++;
+	irp->Callback = rdpdr_server_smartcard_get_status_change_callback;
+	irp->CallbackData = callbackData;
+	irp->DeviceId = deviceId;
+
+	if (!rdpdr_server_enqueue_irp(context, irp))
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "rdpdr_server_enqueue_irp failed!");
+		rdpdr_server_irp_free(irp);
+		return ERROR_INTERNAL_ERROR;
+	}
+
+	SMARTCARD_OPERATION op = WINPR_C_ARRAY_INIT;
+	op.ioControlCode = SCARD_IOCTL_GETSTATUSCHANGEW;
+	op.call.getStatusChangeW.handles.hContext = *hContext;
+	op.call.getStatusChangeW.dwTimeOut = dwTimeOut;
+	op.call.getStatusChangeW.cReaders = cReaders;
+	op.call.getStatusChangeW.rgReaderStates =
+	    WINPR_CAST_CONST_PTR_AWAY(rgReaderStates, LPSCARD_READERSTATEW);
+
+	wStream* s = Stream_New(nullptr, 256 + cReaders * 256);
+	if (!s)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "Stream_New failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	LONG status = smartcard_irp_device_control_encode_request(s, &op);
+	if (status != SCARD_S_SUCCESS)
+	{
+		Stream_Free(s, TRUE);
+		return (UINT)status;
+	}
+
+	const UINT error = rdpdr_server_send_device_control_request(
+	    context, deviceId, irp->CompletionId, SCARD_IOCTL_GETSTATUSCHANGEW,
+	    SCARD_IOCTL_MAX_OUTPUT_BUFFER_LENGTH, Stream_Buffer(s), (UINT32)Stream_Length(s));
+
+	Stream_Free(s, TRUE);
+	return error;
+}
+
+/* Connect */
+static UINT rdpdr_server_smartcard_connect_callback(RdpdrServerContext* context, wStream* s,
+                                                    RDPDR_IRP* irp, UINT32 deviceId,
+                                                    UINT32 completionId, UINT32 ioStatus)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(s);
+	WINPR_ASSERT(irp);
+
+	WLog_Print(context->priv->log, WLOG_DEBUG,
+	           "SmartcardConnectCallback: deviceId=%" PRIu32 ", completionId=%" PRIu32
+	           ", ioStatus=0x%" PRIx32,
+	           deviceId, completionId, ioStatus);
+
+	if (ioStatus != STATUS_SUCCESS)
+	{
+		if (context->OnSmartcardConnectComplete)
+			context->OnSmartcardConnectComplete(context, irp->CallbackData, ioStatus,
+			                                    SCARD_F_INTERNAL_ERROR, nullptr);
+		rdpdr_server_irp_free(irp);
+		return CHANNEL_RC_OK;
+	}
+
+	SMARTCARD_OPERATION op = WINPR_C_ARRAY_INIT;
+	LONG status = smartcard_irp_device_control_decode_response(s, SCARD_IOCTL_CONNECTW, &op);
+	if (status != SCARD_S_SUCCESS)
+	{
+		smartcard_operation_free(&op, FALSE);
+		rdpdr_server_irp_free(irp);
+		return ERROR_INVALID_DATA;
+	}
+
+	if (context->OnSmartcardConnectComplete)
+		context->OnSmartcardConnectComplete(context, irp->CallbackData, ioStatus, op.returnCode,
+		                                    &op.ret.connect);
+
+	smartcard_operation_free(&op, FALSE);
+	rdpdr_server_irp_free(irp);
+	return CHANNEL_RC_OK;
+}
+
+static UINT rdpdr_server_smartcard_connect(RdpdrServerContext* context, void* callbackData,
+                                           UINT32 deviceId, const REDIR_SCARDCONTEXT* hContext,
+                                           const WCHAR* szReader, UINT32 dwShareMode,
+                                           UINT32 dwPreferredProtocols)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(callbackData);
+	WINPR_ASSERT(hContext);
+	WINPR_ASSERT(szReader);
+
+	RDPDR_IRP* irp = rdpdr_server_irp_new();
+	if (!irp)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "rdpdr_server_irp_new failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	irp->CompletionId = context->priv->NextCompletionId++;
+	irp->Callback = rdpdr_server_smartcard_connect_callback;
+	irp->CallbackData = callbackData;
+	irp->DeviceId = deviceId;
+
+	if (!rdpdr_server_enqueue_irp(context, irp))
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "rdpdr_server_enqueue_irp failed!");
+		rdpdr_server_irp_free(irp);
+		return ERROR_INTERNAL_ERROR;
+	}
+
+	SMARTCARD_OPERATION op = WINPR_C_ARRAY_INIT;
+	op.ioControlCode = SCARD_IOCTL_CONNECTW;
+	op.call.connectW.Common.handles.hContext = *hContext;
+	op.call.connectW.Common.dwShareMode = dwShareMode;
+	op.call.connectW.Common.dwPreferredProtocols = dwPreferredProtocols;
+	op.call.connectW.szReader = WINPR_CAST_CONST_PTR_AWAY(szReader, WCHAR*);
+
+	wStream* s = Stream_New(nullptr, 512);
+	if (!s)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "Stream_New failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	LONG status = smartcard_irp_device_control_encode_request(s, &op);
+	if (status != SCARD_S_SUCCESS)
+	{
+		Stream_Free(s, TRUE);
+		return (UINT)status;
+	}
+
+	const UINT error = rdpdr_server_send_device_control_request(
+	    context, deviceId, irp->CompletionId, SCARD_IOCTL_CONNECTW,
+	    SCARD_IOCTL_MAX_OUTPUT_BUFFER_LENGTH, Stream_Buffer(s), (UINT32)Stream_Length(s));
+
+	Stream_Free(s, TRUE);
+	return error;
+}
+
+/* BeginTransaction */
+static UINT rdpdr_server_smartcard_begin_transaction_callback(RdpdrServerContext* context,
+                                                              wStream* s, RDPDR_IRP* irp,
+                                                              UINT32 deviceId, UINT32 completionId,
+                                                              UINT32 ioStatus)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(s);
+	WINPR_ASSERT(irp);
+
+	WLog_Print(context->priv->log, WLOG_DEBUG,
+	           "SmartcardBeginTransactionCallback: deviceId=%" PRIu32 ", completionId=%" PRIu32
+	           ", ioStatus=0x%" PRIx32,
+	           deviceId, completionId, ioStatus);
+
+	if (ioStatus != STATUS_SUCCESS)
+	{
+		if (context->OnSmartcardBeginTransactionComplete)
+			context->OnSmartcardBeginTransactionComplete(context, irp->CallbackData, ioStatus,
+			                                             SCARD_F_INTERNAL_ERROR);
+		rdpdr_server_irp_free(irp);
+		return CHANNEL_RC_OK;
+	}
+
+	SMARTCARD_OPERATION op = WINPR_C_ARRAY_INIT;
+	LONG status =
+	    smartcard_irp_device_control_decode_response(s, SCARD_IOCTL_BEGINTRANSACTION, &op);
+	if (status != SCARD_S_SUCCESS)
+	{
+		smartcard_operation_free(&op, FALSE);
+		rdpdr_server_irp_free(irp);
+		return ERROR_INVALID_DATA;
+	}
+
+	if (context->OnSmartcardBeginTransactionComplete)
+		context->OnSmartcardBeginTransactionComplete(context, irp->CallbackData, ioStatus,
+		                                             op.returnCode);
+
+	smartcard_operation_free(&op, FALSE);
+	rdpdr_server_irp_free(irp);
+	return CHANNEL_RC_OK;
+}
+
+static UINT rdpdr_server_smartcard_begin_transaction(RdpdrServerContext* context,
+                                                     void* callbackData, UINT32 deviceId,
+                                                     const REDIR_SCARDCONTEXT* hContext,
+                                                     const REDIR_SCARDHANDLE* hCard)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(callbackData);
+	WINPR_ASSERT(hContext);
+	WINPR_ASSERT(hCard);
+
+	RDPDR_IRP* irp = rdpdr_server_irp_new();
+	if (!irp)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "rdpdr_server_irp_new failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	irp->CompletionId = context->priv->NextCompletionId++;
+	irp->Callback = rdpdr_server_smartcard_begin_transaction_callback;
+	irp->CallbackData = callbackData;
+	irp->DeviceId = deviceId;
+
+	if (!rdpdr_server_enqueue_irp(context, irp))
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "rdpdr_server_enqueue_irp failed!");
+		rdpdr_server_irp_free(irp);
+		return ERROR_INTERNAL_ERROR;
+	}
+
+	SMARTCARD_OPERATION op = WINPR_C_ARRAY_INIT;
+	op.ioControlCode = SCARD_IOCTL_BEGINTRANSACTION;
+	op.call.hCardAndDisposition.handles.hContext = *hContext;
+	op.call.hCardAndDisposition.handles.hCard = *hCard;
+	op.call.hCardAndDisposition.dwDisposition = SCARD_LEAVE_CARD;
+
+	wStream* s = Stream_New(nullptr, 128);
+	if (!s)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "Stream_New failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	LONG status = smartcard_irp_device_control_encode_request(s, &op);
+	if (status != SCARD_S_SUCCESS)
+	{
+		Stream_Free(s, TRUE);
+		return (UINT)status;
+	}
+
+	const UINT error = rdpdr_server_send_device_control_request(
+	    context, deviceId, irp->CompletionId, SCARD_IOCTL_BEGINTRANSACTION,
+	    SCARD_IOCTL_MAX_OUTPUT_BUFFER_LENGTH, Stream_Buffer(s), (UINT32)Stream_Length(s));
+
+	Stream_Free(s, TRUE);
+	return error;
+}
+
+/* Transmit */
+static UINT rdpdr_server_smartcard_transmit_callback(RdpdrServerContext* context, wStream* s,
+                                                     RDPDR_IRP* irp, UINT32 deviceId,
+                                                     UINT32 completionId, UINT32 ioStatus)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(s);
+	WINPR_ASSERT(irp);
+
+	WLog_Print(context->priv->log, WLOG_DEBUG,
+	           "SmartcardTransmitCallback: deviceId=%" PRIu32 ", completionId=%" PRIu32
+	           ", ioStatus=0x%" PRIx32,
+	           deviceId, completionId, ioStatus);
+
+	if (ioStatus != STATUS_SUCCESS)
+	{
+		if (context->OnSmartcardTransmitComplete)
+			context->OnSmartcardTransmitComplete(context, irp->CallbackData, ioStatus,
+			                                     SCARD_F_INTERNAL_ERROR, nullptr);
+		rdpdr_server_irp_free(irp);
+		return CHANNEL_RC_OK;
+	}
+
+	SMARTCARD_OPERATION op = WINPR_C_ARRAY_INIT;
+	LONG status = smartcard_irp_device_control_decode_response(s, SCARD_IOCTL_TRANSMIT, &op);
+	if (status != SCARD_S_SUCCESS)
+	{
+		smartcard_operation_free(&op, FALSE);
+		rdpdr_server_irp_free(irp);
+		return ERROR_INVALID_DATA;
+	}
+
+	if (context->OnSmartcardTransmitComplete)
+		context->OnSmartcardTransmitComplete(context, irp->CallbackData, ioStatus, op.returnCode,
+		                                     &op.ret.transmit);
+
+	smartcard_operation_free(&op, FALSE);
+	rdpdr_server_irp_free(irp);
+	return CHANNEL_RC_OK;
+}
+
+static UINT rdpdr_server_smartcard_transmit(RdpdrServerContext* context, void* callbackData,
+                                            UINT32 deviceId, const REDIR_SCARDCONTEXT* hContext,
+                                            const REDIR_SCARDHANDLE* hCard,
+                                            const SCARD_IO_REQUEST* pioSendPci, UINT32 cbSendLength,
+                                            const BYTE* pbSendBuffer, UINT32 cbRecvLength)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(callbackData);
+	WINPR_ASSERT(hContext);
+	WINPR_ASSERT(hCard);
+
+	RDPDR_IRP* irp = rdpdr_server_irp_new();
+	if (!irp)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "rdpdr_server_irp_new failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	irp->CompletionId = context->priv->NextCompletionId++;
+	irp->Callback = rdpdr_server_smartcard_transmit_callback;
+	irp->CallbackData = callbackData;
+	irp->DeviceId = deviceId;
+
+	if (!rdpdr_server_enqueue_irp(context, irp))
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "rdpdr_server_enqueue_irp failed!");
+		rdpdr_server_irp_free(irp);
+		return ERROR_INTERNAL_ERROR;
+	}
+
+	SMARTCARD_OPERATION op = WINPR_C_ARRAY_INIT;
+	op.ioControlCode = SCARD_IOCTL_TRANSMIT;
+	op.call.transmit.handles.hContext = *hContext;
+	op.call.transmit.handles.hCard = *hCard;
+	op.call.transmit.pioSendPci = WINPR_CAST_CONST_PTR_AWAY(pioSendPci, LPSCARD_IO_REQUEST);
+	op.call.transmit.cbSendLength = cbSendLength;
+	op.call.transmit.pbSendBuffer = WINPR_CAST_CONST_PTR_AWAY(pbSendBuffer, BYTE*);
+	op.call.transmit.pioRecvPci = nullptr;
+	op.call.transmit.fpbRecvBufferIsNULL = 0;
+	op.call.transmit.cbRecvLength = cbRecvLength;
+
+	wStream* s = Stream_New(nullptr, 512 + cbSendLength);
+	if (!s)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "Stream_New failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	LONG status = smartcard_irp_device_control_encode_request(s, &op);
+	if (status != SCARD_S_SUCCESS)
+	{
+		Stream_Free(s, TRUE);
+		return (UINT)status;
+	}
+
+	const UINT error = rdpdr_server_send_device_control_request(
+	    context, deviceId, irp->CompletionId, SCARD_IOCTL_TRANSMIT,
+	    SCARD_IOCTL_MAX_OUTPUT_BUFFER_LENGTH, Stream_Buffer(s), (UINT32)Stream_Length(s));
+
+	Stream_Free(s, TRUE);
+	return error;
+}
+
+/* EndTransaction */
+static UINT rdpdr_server_smartcard_end_transaction_callback(RdpdrServerContext* context, wStream* s,
+                                                            RDPDR_IRP* irp, UINT32 deviceId,
+                                                            UINT32 completionId, UINT32 ioStatus)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(s);
+	WINPR_ASSERT(irp);
+
+	WLog_Print(context->priv->log, WLOG_DEBUG,
+	           "SmartcardEndTransactionCallback: deviceId=%" PRIu32 ", completionId=%" PRIu32
+	           ", ioStatus=0x%" PRIx32,
+	           deviceId, completionId, ioStatus);
+
+	if (ioStatus != STATUS_SUCCESS)
+	{
+		if (context->OnSmartcardEndTransactionComplete)
+			context->OnSmartcardEndTransactionComplete(context, irp->CallbackData, ioStatus,
+			                                           SCARD_F_INTERNAL_ERROR);
+		rdpdr_server_irp_free(irp);
+		return CHANNEL_RC_OK;
+	}
+
+	SMARTCARD_OPERATION op = WINPR_C_ARRAY_INIT;
+	LONG status = smartcard_irp_device_control_decode_response(s, SCARD_IOCTL_ENDTRANSACTION, &op);
+	if (status != SCARD_S_SUCCESS)
+	{
+		smartcard_operation_free(&op, FALSE);
+		rdpdr_server_irp_free(irp);
+		return ERROR_INVALID_DATA;
+	}
+
+	if (context->OnSmartcardEndTransactionComplete)
+		context->OnSmartcardEndTransactionComplete(context, irp->CallbackData, ioStatus,
+		                                           op.returnCode);
+
+	smartcard_operation_free(&op, FALSE);
+	rdpdr_server_irp_free(irp);
+	return CHANNEL_RC_OK;
+}
+
+static UINT rdpdr_server_smartcard_end_transaction(RdpdrServerContext* context, void* callbackData,
+                                                   UINT32 deviceId,
+                                                   const REDIR_SCARDCONTEXT* hContext,
+                                                   const REDIR_SCARDHANDLE* hCard,
+                                                   UINT32 dwDisposition)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(callbackData);
+	WINPR_ASSERT(hContext);
+	WINPR_ASSERT(hCard);
+
+	RDPDR_IRP* irp = rdpdr_server_irp_new();
+	if (!irp)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "rdpdr_server_irp_new failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	irp->CompletionId = context->priv->NextCompletionId++;
+	irp->Callback = rdpdr_server_smartcard_end_transaction_callback;
+	irp->CallbackData = callbackData;
+	irp->DeviceId = deviceId;
+
+	if (!rdpdr_server_enqueue_irp(context, irp))
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "rdpdr_server_enqueue_irp failed!");
+		rdpdr_server_irp_free(irp);
+		return ERROR_INTERNAL_ERROR;
+	}
+
+	SMARTCARD_OPERATION op = WINPR_C_ARRAY_INIT;
+	op.ioControlCode = SCARD_IOCTL_ENDTRANSACTION;
+	op.call.hCardAndDisposition.handles.hContext = *hContext;
+	op.call.hCardAndDisposition.handles.hCard = *hCard;
+	op.call.hCardAndDisposition.dwDisposition = dwDisposition;
+
+	wStream* s = Stream_New(nullptr, 128);
+	if (!s)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "Stream_New failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	LONG status = smartcard_irp_device_control_encode_request(s, &op);
+	if (status != SCARD_S_SUCCESS)
+	{
+		Stream_Free(s, TRUE);
+		return (UINT)status;
+	}
+
+	const UINT error = rdpdr_server_send_device_control_request(
+	    context, deviceId, irp->CompletionId, SCARD_IOCTL_ENDTRANSACTION,
+	    SCARD_IOCTL_MAX_OUTPUT_BUFFER_LENGTH, Stream_Buffer(s), (UINT32)Stream_Length(s));
+
+	Stream_Free(s, TRUE);
+	return error;
+}
+
+/* Disconnect */
+static UINT rdpdr_server_smartcard_disconnect_callback(RdpdrServerContext* context, wStream* s,
+                                                       RDPDR_IRP* irp, UINT32 deviceId,
+                                                       UINT32 completionId, UINT32 ioStatus)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(s);
+	WINPR_ASSERT(irp);
+
+	WLog_Print(context->priv->log, WLOG_DEBUG,
+	           "SmartcardDisconnectCallback: deviceId=%" PRIu32 ", completionId=%" PRIu32
+	           ", ioStatus=0x%" PRIx32,
+	           deviceId, completionId, ioStatus);
+
+	if (ioStatus != STATUS_SUCCESS)
+	{
+		if (context->OnSmartcardDisconnectComplete)
+			context->OnSmartcardDisconnectComplete(context, irp->CallbackData, ioStatus,
+			                                       SCARD_F_INTERNAL_ERROR);
+		rdpdr_server_irp_free(irp);
+		return CHANNEL_RC_OK;
+	}
+
+	SMARTCARD_OPERATION op = WINPR_C_ARRAY_INIT;
+	LONG status = smartcard_irp_device_control_decode_response(s, SCARD_IOCTL_DISCONNECT, &op);
+	if (status != SCARD_S_SUCCESS)
+	{
+		smartcard_operation_free(&op, FALSE);
+		rdpdr_server_irp_free(irp);
+		return ERROR_INVALID_DATA;
+	}
+
+	if (context->OnSmartcardDisconnectComplete)
+		context->OnSmartcardDisconnectComplete(context, irp->CallbackData, ioStatus, op.returnCode);
+
+	smartcard_operation_free(&op, FALSE);
+	rdpdr_server_irp_free(irp);
+	return CHANNEL_RC_OK;
+}
+
+static UINT rdpdr_server_smartcard_disconnect(RdpdrServerContext* context, void* callbackData,
+                                              UINT32 deviceId, const REDIR_SCARDCONTEXT* hContext,
+                                              const REDIR_SCARDHANDLE* hCard, UINT32 dwDisposition)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(callbackData);
+	WINPR_ASSERT(hContext);
+	WINPR_ASSERT(hCard);
+
+	RDPDR_IRP* irp = rdpdr_server_irp_new();
+	if (!irp)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "rdpdr_server_irp_new failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	irp->CompletionId = context->priv->NextCompletionId++;
+	irp->Callback = rdpdr_server_smartcard_disconnect_callback;
+	irp->CallbackData = callbackData;
+	irp->DeviceId = deviceId;
+
+	if (!rdpdr_server_enqueue_irp(context, irp))
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "rdpdr_server_enqueue_irp failed!");
+		rdpdr_server_irp_free(irp);
+		return ERROR_INTERNAL_ERROR;
+	}
+
+	SMARTCARD_OPERATION op = WINPR_C_ARRAY_INIT;
+	op.ioControlCode = SCARD_IOCTL_DISCONNECT;
+	op.call.hCardAndDisposition.handles.hContext = *hContext;
+	op.call.hCardAndDisposition.handles.hCard = *hCard;
+	op.call.hCardAndDisposition.dwDisposition = dwDisposition;
+
+	wStream* s = Stream_New(nullptr, 128);
+	if (!s)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "Stream_New failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	LONG status = smartcard_irp_device_control_encode_request(s, &op);
+	if (status != SCARD_S_SUCCESS)
+	{
+		Stream_Free(s, TRUE);
+		return (UINT)status;
+	}
+
+	const UINT error = rdpdr_server_send_device_control_request(
+	    context, deviceId, irp->CompletionId, SCARD_IOCTL_DISCONNECT,
+	    SCARD_IOCTL_MAX_OUTPUT_BUFFER_LENGTH, Stream_Buffer(s), (UINT32)Stream_Length(s));
+
+	Stream_Free(s, TRUE);
+	return error;
+}
+
+/* ReleaseContext */
+static UINT rdpdr_server_smartcard_release_context_callback(RdpdrServerContext* context, wStream* s,
+                                                            RDPDR_IRP* irp, UINT32 deviceId,
+                                                            UINT32 completionId, UINT32 ioStatus)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(s);
+	WINPR_ASSERT(irp);
+
+	WLog_Print(context->priv->log, WLOG_DEBUG,
+	           "SmartcardReleaseContextCallback: deviceId=%" PRIu32 ", completionId=%" PRIu32
+	           ", ioStatus=0x%" PRIx32,
+	           deviceId, completionId, ioStatus);
+
+	if (ioStatus != STATUS_SUCCESS)
+	{
+		if (context->OnSmartcardReleaseContextComplete)
+			context->OnSmartcardReleaseContextComplete(context, irp->CallbackData, ioStatus,
+			                                           SCARD_F_INTERNAL_ERROR);
+		rdpdr_server_irp_free(irp);
+		return CHANNEL_RC_OK;
+	}
+
+	SMARTCARD_OPERATION op = WINPR_C_ARRAY_INIT;
+	LONG status = smartcard_irp_device_control_decode_response(s, SCARD_IOCTL_RELEASECONTEXT, &op);
+	if (status != SCARD_S_SUCCESS)
+	{
+		smartcard_operation_free(&op, FALSE);
+		rdpdr_server_irp_free(irp);
+		return ERROR_INVALID_DATA;
+	}
+
+	if (context->OnSmartcardReleaseContextComplete)
+		context->OnSmartcardReleaseContextComplete(context, irp->CallbackData, ioStatus,
+		                                           op.returnCode);
+
+	smartcard_operation_free(&op, FALSE);
+	rdpdr_server_irp_free(irp);
+	return CHANNEL_RC_OK;
+}
+
+static UINT rdpdr_server_smartcard_release_context(RdpdrServerContext* context, void* callbackData,
+                                                   UINT32 deviceId,
+                                                   const REDIR_SCARDCONTEXT* hContext)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->priv);
+	WINPR_ASSERT(callbackData);
+	WINPR_ASSERT(hContext);
+
+	RDPDR_IRP* irp = rdpdr_server_irp_new();
+	if (!irp)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "rdpdr_server_irp_new failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	irp->CompletionId = context->priv->NextCompletionId++;
+	irp->Callback = rdpdr_server_smartcard_release_context_callback;
+	irp->CallbackData = callbackData;
+	irp->DeviceId = deviceId;
+
+	if (!rdpdr_server_enqueue_irp(context, irp))
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "rdpdr_server_enqueue_irp failed!");
+		rdpdr_server_irp_free(irp);
+		return ERROR_INTERNAL_ERROR;
+	}
+
+	SMARTCARD_OPERATION op = WINPR_C_ARRAY_INIT;
+	op.ioControlCode = SCARD_IOCTL_RELEASECONTEXT;
+	op.call.context.handles.hContext = *hContext;
+
+	wStream* s = Stream_New(nullptr, 64);
+	if (!s)
+	{
+		WLog_Print(context->priv->log, WLOG_ERROR, "Stream_New failed!");
+		return CHANNEL_RC_NO_MEMORY;
+	}
+
+	LONG status = smartcard_irp_device_control_encode_request(s, &op);
+	if (status != SCARD_S_SUCCESS)
+	{
+		Stream_Free(s, TRUE);
+		return (UINT)status;
+	}
+
+	const UINT error = rdpdr_server_send_device_control_request(
+	    context, deviceId, irp->CompletionId, SCARD_IOCTL_RELEASECONTEXT,
+	    SCARD_IOCTL_MAX_OUTPUT_BUFFER_LENGTH, Stream_Buffer(s), (UINT32)Stream_Length(s));
+
+	Stream_Free(s, TRUE);
+	return error;
+}
+
 RdpdrServerContext* rdpdr_server_context_new(HANDLE vcm)
 {
 	RdpdrServerContext* context = (RdpdrServerContext*)calloc(1, sizeof(RdpdrServerContext));
@@ -3762,6 +4715,15 @@ RdpdrServerContext* rdpdr_server_context_new(HANDLE vcm)
 	context->DriveCloseFile = rdpdr_server_drive_close_file;
 	context->DriveDeleteFile = rdpdr_server_drive_delete_file;
 	context->DriveRenameFile = rdpdr_server_drive_rename_file;
+	context->SmartcardEstablishContext = rdpdr_server_smartcard_establish_context;
+	context->SmartcardListReaders = rdpdr_server_smartcard_list_readers;
+	context->SmartcardGetStatusChange = rdpdr_server_smartcard_get_status_change;
+	context->SmartcardConnect = rdpdr_server_smartcard_connect;
+	context->SmartcardBeginTransaction = rdpdr_server_smartcard_begin_transaction;
+	context->SmartcardTransmit = rdpdr_server_smartcard_transmit;
+	context->SmartcardEndTransaction = rdpdr_server_smartcard_end_transaction;
+	context->SmartcardDisconnect = rdpdr_server_smartcard_disconnect;
+	context->SmartcardReleaseContext = rdpdr_server_smartcard_release_context;
 	context->priv = rdpdr_server_private_new();
 	if (!context->priv)
 		goto fail;
