@@ -84,6 +84,15 @@ extern "C"
 		SCARDHANDLE hCard;
 		const char* ioControlCodeName;
 		UINT32 outputBufferLength; /** @since version 3.13.0 */
+		union
+		{
+			EstablishContext_Return establishContext;
+			ListReaders_Return listReaders;
+			GetStatusChange_Return getStatusChange;
+			Connect_Return connect;
+			Transmit_Return transmit;
+		} ret;           /** @since version 3.27.0 */
+		LONG returnCode; /** @since version 3.27.0 */
 	} SMARTCARD_OPERATION;
 
 	/** @brief Decode a smartcard IOCTL request received from the client.
@@ -110,6 +119,23 @@ extern "C"
 	 *  Kept for backward compatibility; new code should use the _request variant.
 	 */
 #define smartcard_irp_device_control_decode smartcard_irp_device_control_decode_request
+
+	/** @brief Decode a smartcard IOCTL response received from the client.
+	 *
+	 *  Parses the OutputBufferLength, Common Type Header, Private Type Header, and the
+	 *  ReturnCode, then unpacks the IOCTL-specific return payload into \p operation->ret.
+	 *
+	 *  @param s              Stream positioned at OutputBufferLength, after the DeviceIoReply
+	 * header.
+	 *  @param ioControlCode  The SCARD_IOCTL_* code identifying the response type.
+	 *  @param operation [out] The decoded returnCode and ret union.
+	 *  @return \b SCARD_S_SUCCESS on success, a smartcard error code on failure.
+	 *
+	 *  @since version 3.27.0
+	 */
+	WINPR_ATTR_NODISCARD
+	FREERDP_API LONG smartcard_irp_device_control_decode_response(wStream* s, UINT32 ioControlCode,
+	                                                              SMARTCARD_OPERATION* operation);
 
 	/** @brief Free resources held by a SMARTCARD_OPERATION.
 	 *
