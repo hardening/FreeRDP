@@ -865,7 +865,6 @@ void smartcard_operation_free(SMARTCARD_OPERATION* op, BOOL allocated)
 		case SCARD_IOCTL_GETATTRIB:
 		case SCARD_IOCTL_GETTRANSMITCOUNT:
 			break;
-
 		case SCARD_IOCTL_LOCATECARDSA:
 		{
 			LocateCardsA_Call* call = &op->call.locateCardsA;
@@ -882,7 +881,6 @@ void smartcard_operation_free(SMARTCARD_OPERATION* op, BOOL allocated)
 			free_reader_states_w(call->rgReaderStates, call->cReaders);
 		}
 		break;
-
 		case SCARD_IOCTL_LOCATECARDSBYATRA:
 		{
 			LocateCardsByATRA_Call* call = &op->call.locateCardsByATRA;
@@ -904,7 +902,6 @@ void smartcard_operation_free(SMARTCARD_OPERATION* op, BOOL allocated)
 			free(call->sz);
 		}
 		break;
-
 		case SCARD_IOCTL_FORGETREADERW:
 		case SCARD_IOCTL_INTRODUCEREADERGROUPW:
 		case SCARD_IOCTL_FORGETREADERGROUPW:
@@ -913,29 +910,24 @@ void smartcard_operation_free(SMARTCARD_OPERATION* op, BOOL allocated)
 			free(call->sz);
 		}
 		break;
-
 		case SCARD_IOCTL_INTRODUCEREADERA:
 		case SCARD_IOCTL_REMOVEREADERFROMGROUPA:
 		case SCARD_IOCTL_ADDREADERTOGROUPA:
-
 		{
 			ContextAndTwoStringA_Call* call = &op->call.contextAndTwoStringA;
 			free(call->sz1);
 			free(call->sz2);
 		}
 		break;
-
 		case SCARD_IOCTL_INTRODUCEREADERW:
 		case SCARD_IOCTL_REMOVEREADERFROMGROUPW:
 		case SCARD_IOCTL_ADDREADERTOGROUPW:
-
 		{
 			ContextAndTwoStringW_Call* call = &op->call.contextAndTwoStringW;
 			free(call->sz1);
 			free(call->sz2);
 		}
 		break;
-
 		case SCARD_IOCTL_LISTREADERSA:
 		case SCARD_IOCTL_LISTREADERSW:
 		{
@@ -949,7 +941,6 @@ void smartcard_operation_free(SMARTCARD_OPERATION* op, BOOL allocated)
 			free_reader_states_a(call->rgReaderStates, call->cReaders);
 		}
 		break;
-
 		case SCARD_IOCTL_GETSTATUSCHANGEW:
 		{
 			GetStatusChangeW_Call* call = &op->call.getStatusChangeW;
