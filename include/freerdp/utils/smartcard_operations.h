@@ -137,6 +137,22 @@ extern "C"
 	FREERDP_API LONG smartcard_irp_device_control_decode_response(wStream* s, UINT32 ioControlCode,
 	                                                              SMARTCARD_OPERATION* operation);
 
+	/** @brief Encode a smartcard IOCTL request to send to the client.
+	 *
+	 *  Writes the Common Type Header, Private Type Header, and the IOCTL-specific
+	 *  call payload from \p operation->call into the stream. The ioControlCode field
+	 *  in \p operation selects which pack_call function is dispatched.
+	 *
+	 *  @param s         Stream to write into, positioned where the type headers should start.
+	 *  @param operation with the populated call union and ioControlCode to encode.
+	 *  @return \b SCARD_S_SUCCESS on success, a smartcard error code on failure.
+	 *
+	 *  @since version 3.27.0
+	 */
+	WINPR_ATTR_NODISCARD
+	FREERDP_API LONG smartcard_irp_device_control_encode_request(wStream* s,
+	                                                             SMARTCARD_OPERATION* operation);
+
 	/** @brief Free resources held by a SMARTCARD_OPERATION.
 	 *
 	 *  Releases any memory allocated inside the call and ret unions (e.g., reader name
