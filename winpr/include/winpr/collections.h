@@ -85,6 +85,23 @@ extern "C"
 	 */
 	WINPR_API void winpr_ObjectStringFree(void* pvstr);
 
+	/** @brief hash function on pointed UINT32
+	 *  @param id the pointer on the data
+	 *  @return the hash value
+	 *  @since version 3.27.0
+	 */
+	WINPR_ATTR_NODISCARD
+	WINPR_API UINT32 winpr_UINT32Ptr_hash(const void* id);
+
+	/** @brief equals function on pointed UINT32
+	 *  @param o1 first object
+	 *  @param o2 second object
+	 *  @return if *(UINT32*)o1 == *(UINT32*)o2
+	 *  @since version 3.27.0
+	 */
+	WINPR_ATTR_NODISCARD
+	WINPR_API BOOL winpr_UINT32Ptr_equals(const void* o1, const void* o2);
+
 	/* System.Collections.Queue */
 
 	typedef struct s_wQueue wQueue;

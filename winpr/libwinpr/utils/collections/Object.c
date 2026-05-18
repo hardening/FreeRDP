@@ -17,6 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <winpr/assert.h>
 #include <winpr/string.h>
 #include <winpr/collections.h>
 
@@ -39,4 +40,18 @@ void* winpr_ObjectWStringClone(const void* pvstr)
 void winpr_ObjectStringFree(void* pvstr)
 {
 	free(pvstr);
+}
+
+UINT32 winpr_UINT32Ptr_hash(const void* id)
+{
+	WINPR_ASSERT(id);
+	return *((const UINT32*)id);
+}
+
+BOOL winpr_UINT32Ptr_equals(const void* o1, const void* o2)
+{
+	WINPR_ASSERT(o1);
+	WINPR_ASSERT(o2);
+
+	return *((const UINT32*)o1) == *((const UINT32*)o2);
 }
