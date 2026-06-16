@@ -90,9 +90,11 @@ extern "C"
 			ListReaders_Return listReaders;
 			GetStatusChange_Return getStatusChange;
 			Connect_Return connect;
+			Control_Return control;
 			Transmit_Return transmit;
-		} ret;           /** @since version 3.27.0 */
-		LONG returnCode; /** @since version 3.27.0 */
+			GetAttrib_Return getAttrib;
+		} ret;           /** @since version 3.28.0 */
+		LONG returnCode; /** @since version 3.28.0 */
 	} SMARTCARD_OPERATION;
 
 	/** @brief Decode a smartcard IOCTL request received from the client.
@@ -107,7 +109,7 @@ extern "C"
 	 *  @param operation [out] The decoded ioControlCode, call union, and context handles.
 	 *  @return \b SCARD_S_SUCCESS on success, a smartcard error code on failure.
 	 *
-	 *  @since version 3.27.0
+	 *  @since version 3.28.0
 	 */
 	WINPR_ATTR_NODISCARD
 	FREERDP_API LONG smartcard_irp_device_control_decode_request(wStream* s, UINT32 CompletionId,
@@ -131,7 +133,7 @@ extern "C"
 	 *  @param operation [out] The decoded returnCode and ret union.
 	 *  @return \b SCARD_S_SUCCESS on success, a smartcard error code on failure.
 	 *
-	 *  @since version 3.27.0
+	 *  @since version 3.28.0
 	 */
 	WINPR_ATTR_NODISCARD
 	FREERDP_API LONG smartcard_irp_device_control_decode_response(wStream* s, UINT32 ioControlCode,
@@ -147,11 +149,11 @@ extern "C"
 	 *  @param operation with the populated call union and ioControlCode to encode.
 	 *  @return \b SCARD_S_SUCCESS on success, a smartcard error code on failure.
 	 *
-	 *  @since version 3.27.0
+	 *  @since version 3.28.0
 	 */
 	WINPR_ATTR_NODISCARD
-	FREERDP_API LONG smartcard_irp_device_control_encode_request(wStream* s,
-	                                                             SMARTCARD_OPERATION* operation);
+	FREERDP_API LONG
+	smartcard_irp_device_control_encode_request(wStream* s, const SMARTCARD_OPERATION* operation);
 
 	/** @brief Free resources held by a SMARTCARD_OPERATION.
 	 *

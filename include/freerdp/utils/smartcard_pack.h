@@ -141,7 +141,7 @@ extern "C"
 	 *  @param s   Stream positioned after the the Common/Private Type Headers and the ReturnCode.
 	 *  @param ret [out] The decoded EstablishContext_Return.
 	 *  @return \b SCARD_S_SUCCESS on success, an error code on failure.
-	 *  @since version 3.27.0
+	 *  @since version 3.28.0
 	 */
 	WINPR_ATTR_NODISCARD
 	FREERDP_API LONG smartcard_unpack_establish_context_return(wStream* s,
@@ -299,10 +299,37 @@ extern "C"
 	WINPR_ATTR_NODISCARD
 	FREERDP_API LONG smartcard_pack_connect_return(wStream* s, const Connect_Return* ret);
 
+	/** @brief Unpack a Connect_Return from a stream.
+	 *  @param s   Stream positioned after the Common/Private Type Headers and the ReturnCode.
+	 *  @param ret [out] The decoded Connect_Return.
+	 *  @return \b SCARD_S_SUCCESS on success, an error code on failure.
+	 *  @since version 3.28.0
+	 */
+	WINPR_ATTR_NODISCARD
+	FREERDP_API LONG smartcard_unpack_connect_return(wStream* s, Connect_Return* ret);
+
+	/** @brief Pack a Control_Call into a stream.
+	 *  @param s   Stream to write into after the Common/Private Type Headers and the ReturnCode.
+	 *  @param ret The Control_Call to encode.
+	 *  @return \b SCARD_S_SUCCESS on success, an error code on failure.
+	 *  @since version 3.28.0
+	 */
+	WINPR_ATTR_NODISCARD
+	FREERDP_API LONG smartcard_pack_control_call(wStream* s, const Control_Call* call);
+
+	/** @brief Unpack a Control_return from a stream.
+	 *  @param s   Stream positioned after the Common/Private Type Headers.
+	 *  @param ret [out] the decoded Control_Return.
+	 *  @return \b SCARD_S_SUCCESS on success, an error code on failure.
+	 */
+	WINPR_ATTR_NODISCARD
+	FREERDP_API LONG smartcard_unpack_control_return(wStream* s, Control_Return* ret);
+
 	/** @brief Unpack a Reconnect_Call from a stream.
 	 *  @param s    Stream positioned after the Common/Private Type Headers.
 	 *  @param call [out] The decoded Reconnect_Call.
 	 *  @return \b SCARD_S_SUCCESS on success, an error code on failure.
+	 *  @since version 3.28.0
 	 */
 	WINPR_ATTR_NODISCARD
 	FREERDP_API LONG smartcard_unpack_reconnect_call(wStream* s, Reconnect_Call* call);
@@ -400,6 +427,15 @@ extern "C"
 	WINPR_ATTR_NODISCARD
 	FREERDP_API LONG smartcard_unpack_get_attrib_call(wStream* s, GetAttrib_Call* call);
 
+	/** @brief Pack a GetAttrib_Call to a stream.
+	 *  @param s   wStream to write to.
+	 *  @param ret [out] The GetAttrib_Call to encode.
+	 *  @return \b SCARD_S_SUCCESS on success, an error code on failure.
+	 *  @since version 3.28.0
+	 */
+	WINPR_ATTR_NODISCARD
+	FREERDP_API LONG smartcard_pack_get_attrib_call(wStream* s, const GetAttrib_Call* call);
+
 	/** @brief Pack a GetAttrib_Return into a stream.
 	 *  @param s            Stream to write into after the Common/Private Type Headers and the
 	 * ReturnCode.
@@ -411,6 +447,14 @@ extern "C"
 	WINPR_ATTR_NODISCARD
 	FREERDP_API LONG smartcard_pack_get_attrib_return(wStream* s, const GetAttrib_Return* ret,
 	                                                  DWORD dwAttrId, DWORD cbAttrCallLen);
+
+	/** @brief Unpack a GetAttrib_Return from a stream.
+	 *  @param s   Stream positioned after the Common/Private Type Headers and the ReturnCode.
+	 *  @param ret [out] The decoded GetAttrib_Return.
+	 *  @return \b SCARD_S_SUCCESS on success, an error code on failure.
+	 */
+	WINPR_ATTR_NODISCARD
+	FREERDP_API LONG smartcard_unpack_get_attrib_return(wStream* s, GetAttrib_Return* ret);
 
 	/** @brief Unpack a SetAttrib_Call from a stream.
 	 *  @param s    Stream positioned after the Common/Private Type Headers.
@@ -452,10 +496,19 @@ extern "C"
 	WINPR_ATTR_NODISCARD
 	FREERDP_API LONG smartcard_pack_transmit_return(wStream* s, const Transmit_Return* ret);
 
+	/** @brief Unpack a Transmit_Return from a stream.
+	 *  @param s   Stream positioned after the Common/Private Type Headers and the ReturnCode.
+	 *  @param ret [out] The decoded Transmit_Return.
+	 *  @return \b SCARD_S_SUCCESS on success, an error code on failure.
+	 */
+	WINPR_ATTR_NODISCARD
+	FREERDP_API LONG smartcard_unpack_transmit_return(wStream* s, Transmit_Return* ret);
+
 	/** @brief Unpack a LocateCardsByATRA_Call from a stream.
 	 *  @param s    Stream positioned after the Common/Private Type Headers.
 	 *  @param call [out] The decoded LocateCardsByATRA_Call.
 	 *  @return \b SCARD_S_SUCCESS on success, an error code on failure.
+	 *  @since version 3.28.0
 	 */
 	WINPR_ATTR_NODISCARD
 	FREERDP_API LONG smartcard_unpack_locate_cards_by_atr_a_call(wStream* s,
@@ -656,22 +709,6 @@ extern "C"
 	FREERDP_API LONG smartcard_unpack_get_status_change_return(wStream* s,
 	                                                           GetStatusChange_Return* ret,
 	                                                           BOOL unicode);
-
-	/** @brief Unpack a Connect_Return from a stream.
-	 *  @param s   Stream positioned after the Common/Private Type Headers and the ReturnCode.
-	 *  @param ret [out] The decoded Connect_Return.
-	 *  @return \b SCARD_S_SUCCESS on success, an error code on failure.
-	 */
-	WINPR_ATTR_NODISCARD
-	FREERDP_API LONG smartcard_unpack_connect_return(wStream* s, Connect_Return* ret);
-
-	/** @brief Unpack a Transmit_Return from a stream.
-	 *  @param s   Stream positioned after the Common/Private Type Headers and the ReturnCode.
-	 *  @param ret [out] The decoded Transmit_Return.
-	 *  @return \b SCARD_S_SUCCESS on success, an error code on failure.
-	 */
-	WINPR_ATTR_NODISCARD
-	FREERDP_API LONG smartcard_unpack_transmit_return(wStream* s, Transmit_Return* ret);
 
 #ifdef __cplusplus
 }

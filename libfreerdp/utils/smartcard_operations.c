@@ -555,7 +555,7 @@ LONG smartcard_irp_device_control_decode_request(wStream* s, UINT32 CompletionId
 	const UINT32 outputBufferLength = Stream_Get_UINT32(s); /* OutputBufferLength (4 bytes) */
 	const UINT32 inputBufferLength = Stream_Get_UINT32(s);  /* InputBufferLength (4 bytes) */
 	const UINT32 ioControlCode = Stream_Get_UINT32(s);      /* IoControlCode (4 bytes) */
-	Stream_Seek(s, 20);                        /* Padding (20 bytes) */
+	Stream_Seek(s, 20);                                     /* Padding (20 bytes) */
 	operation->ioControlCode = ioControlCode;
 	operation->ioControlCodeName = scard_get_ioctl_string(ioControlCode, FALSE);
 	operation->outputBufferLength = outputBufferLength;
@@ -885,6 +885,14 @@ static LONG smartcard_ConnectW_decode_response(wStream* s, SMARTCARD_OPERATION* 
 	return smartcard_unpack_connect_return(s, &operation->ret.connect);
 }
 
+static LONG smartcard_Control_decode_response(wStream* s, SMARTCARD_OPERATION* operation)
+{
+	WINPR_ASSERT(s);
+	WINPR_ASSERT(operation);
+
+	return smartcard_unpack_control_return(s, &operation->ret.control);
+}
+
 static LONG smartcard_BeginTransaction_decode_response(wStream* s, SMARTCARD_OPERATION* operation)
 {
 	WINPR_UNUSED(s);
@@ -921,6 +929,14 @@ static LONG smartcard_Transmit_decode_response(wStream* s, SMARTCARD_OPERATION* 
 	WINPR_ASSERT(operation);
 
 	return smartcard_unpack_transmit_return(s, &operation->ret.transmit);
+}
+
+static LONG smartcard_GetAttrib_decode_response(wStream* s, SMARTCARD_OPERATION* operation)
+{
+	WINPR_ASSERT(s);
+	WINPR_ASSERT(operation);
+
+	return smartcard_unpack_get_attrib_return(s, &operation->ret.getAttrib);
 }
 
 LONG smartcard_irp_device_control_decode_response(wStream* s, UINT32 ioControlCode,
@@ -1002,6 +1018,10 @@ LONG smartcard_irp_device_control_decode_response(wStream* s, UINT32 ioControlCo
 			status = smartcard_ConnectW_decode_response(s, operation);
 			break;
 
+		case SCARD_IOCTL_CONTROL:
+			status = smartcard_Control_decode_response(s, operation);
+			break;
+
 		case SCARD_IOCTL_BEGINTRANSACTION:
 			status = smartcard_BeginTransaction_decode_response(s, operation);
 			break;
@@ -1016,6 +1036,10 @@ LONG smartcard_irp_device_control_decode_response(wStream* s, UINT32 ioControlCo
 
 		case SCARD_IOCTL_TRANSMIT:
 			status = smartcard_Transmit_decode_response(s, operation);
+			break;
+
+		case SCARD_IOCTL_GETATTRIB:
+			status = smartcard_GetAttrib_decode_response(s, operation);
 			break;
 
 		default:
@@ -1034,7 +1058,8 @@ LONG smartcard_irp_device_control_decode_response(wStream* s, UINT32 ioControlCo
 	return status;
 }
 
-static LONG smartcard_EstablishContext_encode_request(wStream* s, SMARTCARD_OPERATION* operation)
+static LONG smartcard_EstablishContext_encode_request(wStream* s,
+                                                      const SMARTCARD_OPERATION* operation)
 {
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(operation);
@@ -1042,7 +1067,8 @@ static LONG smartcard_EstablishContext_encode_request(wStream* s, SMARTCARD_OPER
 	return smartcard_pack_establish_context_call(s, &operation->call.establishContext);
 }
 
-static LONG smartcard_ReleaseContext_encode_request(wStream* s, SMARTCARD_OPERATION* operation)
+static LONG smartcard_ReleaseContext_encode_request(wStream* s,
+                                                    const SMARTCARD_OPERATION* operation)
 {
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(operation);
@@ -1050,7 +1076,7 @@ static LONG smartcard_ReleaseContext_encode_request(wStream* s, SMARTCARD_OPERAT
 	return smartcard_pack_context_call(s, &operation->call.context, "ReleaseContext");
 }
 
-static LONG smartcard_ListReadersA_encode_request(wStream* s, SMARTCARD_OPERATION* operation)
+static LONG smartcard_ListReadersA_encode_request(wStream* s, const SMARTCARD_OPERATION* operation)
 {
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(operation);
@@ -1058,7 +1084,7 @@ static LONG smartcard_ListReadersA_encode_request(wStream* s, SMARTCARD_OPERATIO
 	return smartcard_pack_list_readers_call(s, &operation->call.listReaders, FALSE);
 }
 
-static LONG smartcard_ListReadersW_encode_request(wStream* s, SMARTCARD_OPERATION* operation)
+static LONG smartcard_ListReadersW_encode_request(wStream* s, const SMARTCARD_OPERATION* operation)
 {
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(operation);
@@ -1066,7 +1092,8 @@ static LONG smartcard_ListReadersW_encode_request(wStream* s, SMARTCARD_OPERATIO
 	return smartcard_pack_list_readers_call(s, &operation->call.listReaders, TRUE);
 }
 
-static LONG smartcard_GetStatusChangeA_encode_request(wStream* s, SMARTCARD_OPERATION* operation)
+static LONG smartcard_GetStatusChangeA_encode_request(wStream* s,
+                                                      const SMARTCARD_OPERATION* operation)
 {
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(operation);
@@ -1074,7 +1101,8 @@ static LONG smartcard_GetStatusChangeA_encode_request(wStream* s, SMARTCARD_OPER
 	return smartcard_pack_get_status_change_a_call(s, &operation->call.getStatusChangeA);
 }
 
-static LONG smartcard_GetStatusChangeW_encode_request(wStream* s, SMARTCARD_OPERATION* operation)
+static LONG smartcard_GetStatusChangeW_encode_request(wStream* s,
+                                                      const SMARTCARD_OPERATION* operation)
 {
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(operation);
@@ -1082,7 +1110,7 @@ static LONG smartcard_GetStatusChangeW_encode_request(wStream* s, SMARTCARD_OPER
 	return smartcard_pack_get_status_change_w_call(s, &operation->call.getStatusChangeW);
 }
 
-static LONG smartcard_ConnectA_encode_request(wStream* s, SMARTCARD_OPERATION* operation)
+static LONG smartcard_ConnectA_encode_request(wStream* s, const SMARTCARD_OPERATION* operation)
 {
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(operation);
@@ -1090,7 +1118,7 @@ static LONG smartcard_ConnectA_encode_request(wStream* s, SMARTCARD_OPERATION* o
 	return smartcard_pack_connect_a_call(s, &operation->call.connectA);
 }
 
-static LONG smartcard_ConnectW_encode_request(wStream* s, SMARTCARD_OPERATION* operation)
+static LONG smartcard_ConnectW_encode_request(wStream* s, const SMARTCARD_OPERATION* operation)
 {
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(operation);
@@ -1098,7 +1126,16 @@ static LONG smartcard_ConnectW_encode_request(wStream* s, SMARTCARD_OPERATION* o
 	return smartcard_pack_connect_w_call(s, &operation->call.connectW);
 }
 
-static LONG smartcard_BeginTransaction_encode_request(wStream* s, SMARTCARD_OPERATION* operation)
+static LONG smartcard_Control_encode_request(wStream* s, const SMARTCARD_OPERATION* operation)
+{
+	WINPR_ASSERT(s);
+	WINPR_ASSERT(operation);
+
+	return smartcard_pack_control_call(s, &operation->call.control);
+}
+
+static LONG smartcard_BeginTransaction_encode_request(wStream* s,
+                                                      const SMARTCARD_OPERATION* operation)
 {
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(operation);
@@ -1107,7 +1144,8 @@ static LONG smartcard_BeginTransaction_encode_request(wStream* s, SMARTCARD_OPER
 	                                                 "BeginTransaction");
 }
 
-static LONG smartcard_EndTransaction_encode_request(wStream* s, SMARTCARD_OPERATION* operation)
+static LONG smartcard_EndTransaction_encode_request(wStream* s,
+                                                    const SMARTCARD_OPERATION* operation)
 {
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(operation);
@@ -1116,7 +1154,7 @@ static LONG smartcard_EndTransaction_encode_request(wStream* s, SMARTCARD_OPERAT
 	                                                 "EndTransaction");
 }
 
-static LONG smartcard_Disconnect_encode_request(wStream* s, SMARTCARD_OPERATION* operation)
+static LONG smartcard_Disconnect_encode_request(wStream* s, const SMARTCARD_OPERATION* operation)
 {
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(operation);
@@ -1125,7 +1163,7 @@ static LONG smartcard_Disconnect_encode_request(wStream* s, SMARTCARD_OPERATION*
 	                                                 "Disconnect");
 }
 
-static LONG smartcard_Transmit_encode_request(wStream* s, SMARTCARD_OPERATION* operation)
+static LONG smartcard_Transmit_encode_request(wStream* s, const SMARTCARD_OPERATION* operation)
 {
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(operation);
@@ -1133,7 +1171,15 @@ static LONG smartcard_Transmit_encode_request(wStream* s, SMARTCARD_OPERATION* o
 	return smartcard_pack_transmit_call(s, &operation->call.transmit);
 }
 
-LONG smartcard_irp_device_control_encode_request(wStream* s, SMARTCARD_OPERATION* operation)
+static LONG smartcard_GetAttrib_encode_request(wStream* s, const SMARTCARD_OPERATION* operation)
+{
+	WINPR_ASSERT(s);
+	WINPR_ASSERT(operation);
+
+	return smartcard_pack_get_attrib_call(s, &operation->call.getAttrib);
+}
+
+LONG smartcard_irp_device_control_encode_request(wStream* s, const SMARTCARD_OPERATION* operation)
 {
 	LONG status = SCARD_S_SUCCESS;
 
@@ -1180,6 +1226,10 @@ LONG smartcard_irp_device_control_encode_request(wStream* s, SMARTCARD_OPERATION
 			status = smartcard_ConnectW_encode_request(s, operation);
 			break;
 
+		case SCARD_IOCTL_CONTROL:
+			status = smartcard_Control_encode_request(s, operation);
+			break;
+
 		case SCARD_IOCTL_BEGINTRANSACTION:
 			status = smartcard_BeginTransaction_encode_request(s, operation);
 			break;
@@ -1196,6 +1246,10 @@ LONG smartcard_irp_device_control_encode_request(wStream* s, SMARTCARD_OPERATION
 			status = smartcard_Transmit_encode_request(s, operation);
 			break;
 
+		case SCARD_IOCTL_GETATTRIB:
+			status = smartcard_GetAttrib_encode_request(s, operation);
+			break;
+
 		default:
 			WLog_WARN(TAG, "unsupported request for %s (0x%08" PRIX32 ")",
 			          scard_get_ioctl_string(ioControlCode, TRUE), ioControlCode);
@@ -1204,6 +1258,14 @@ LONG smartcard_irp_device_control_encode_request(wStream* s, SMARTCARD_OPERATION
 
 	if (status != SCARD_S_SUCCESS)
 		return status;
+
+	if ((ioControlCode != SCARD_IOCTL_ACCESSSTARTEDEVENT) &&
+	    (ioControlCode != SCARD_IOCTL_RELEASETARTEDEVENT))
+	{
+		const LONG rc = smartcard_pack_write_size_align(s, Stream_GetPosition(s), 8);
+		if (rc != SCARD_S_SUCCESS)
+			return rc;
+	}
 
 	const size_t dataEndPos = Stream_GetPosition(s);
 	const size_t objectBufferLength = dataEndPos - headerPos - SMARTCARD_COMMON_TYPE_HEADER_LENGTH -
