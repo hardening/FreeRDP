@@ -127,13 +127,16 @@ static BOOL arm_tls_connect(rdpArm* arm, rdpTls* tls, UINT32 timeout)
 
 	if (isProxyConnection)
 	{
-		if (!proxy_connect(arm->context, bufferedBio, proxyUsername, proxyPassword,
-		                   freerdp_settings_get_string(settings, FreeRDP_GatewayHostname),
-		                   (UINT16)freerdp_settings_get_uint32(settings, FreeRDP_GatewayPort)))
+		BIO* bio =
+		    proxy_connect(arm->context, bufferedBio, proxyUsername, proxyPassword,
+		                  freerdp_settings_get_string(settings, FreeRDP_GatewayHostname),
+		                  (UINT16)freerdp_settings_get_uint32(settings, FreeRDP_GatewayPort));
+		if (!bio)
 		{
 			BIO_free_all(bufferedBio);
 			return FALSE;
 		}
+		bufferedBio = bio;
 	}
 
 	if (!status)

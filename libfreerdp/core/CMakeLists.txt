@@ -119,6 +119,7 @@ set(${MODULE_PREFIX}_SRCS
     tcp.h
     proxy.c
     proxy.h
+    proxy_bio.c
     tpdu.c
     tpdu.h
     tpkt.c

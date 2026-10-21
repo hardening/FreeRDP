@@ -27,60 +27,15 @@
 #include "proxy.h"
 #include <freerdp/settings.h>
 #include <freerdp/utils/proxy_utils.h>
-#include <freerdp/crypto/crypto.h>
 #include "tcp.h"
 
 #include <winpr/assert.h>
 #include <winpr/sysinfo.h>
 #include <winpr/environment.h> /* For GetEnvironmentVariableA */
 
-#define CRLF "\r\n"
-
 #include <freerdp/log.h>
 #define TAG FREERDP_TAG("core.proxy")
 
-/* SOCKS Proxy auth methods by rfc1928 */
-enum
-{
-	AUTH_M_NO_AUTH = 0,
-	AUTH_M_GSSAPI = 1,
-	AUTH_M_USR_PASS = 2
-};
-
-enum
-{
-	SOCKS_CMD_CONNECT = 1,
-	SOCKS_CMD_BIND = 2,
-	SOCKS_CMD_UDP_ASSOCIATE = 3
-};
-
-enum
-{
-	SOCKS_ADDR_IPV4 = 1,
-	SOCKS_ADDR_FQDN = 3,
-	SOCKS_ADDR_IPV6 = 4,
-};
-
-static const char logprefix[] = "SOCKS Proxy:";
-
-/* CONN REQ replies in enum. order */
-static const char* rplstat[] = { "succeeded",
-	                             "general SOCKS server failure",
-	                             "connection not allowed by ruleset",
-	                             "Network unreachable",
-	                             "Host unreachable",
-	                             "Connection refused",
-	                             "TTL expired",
-	                             "Command not supported",
-	                             "Address type not supported" };
-
-WINPR_ATTR_NODISCARD
-static BOOL http_proxy_connect(rdpContext* context, BIO* bufferedBio, const char* proxyUsername,
-                               const char* proxyPassword, const char* hostname, UINT16 port);
-
-WINPR_ATTR_NODISCARD
-static BOOL socks_proxy_connect(rdpContext* context, BIO* bufferedBio, const char* proxyUsername,
-                                const char* proxyPassword, const char* hostname, UINT16 port);
 static void proxy_read_environment(rdpSettings* settings, char* envname);
 
 BOOL proxy_prepare(rdpSettings* settings, const char** lpPeerHostname, UINT16* lpPeerPort,
@@ -557,527 +512,55 @@ fail:
 	return rc;
 }
 
-BOOL proxy_connect(rdpContext* context, BIO* bufferedBio, const char* proxyUsername,
+BIO* proxy_connect(rdpContext* context, BIO* bio, const char* proxyUsername,
                    const char* proxyPassword, const char* hostname, UINT16 port)
 {
 	WINPR_ASSERT(context);
+	WINPR_ASSERT(bio);
+	WINPR_ASSERT(hostname);
 	rdpSettings* settings = context->settings;
 
-	switch (freerdp_settings_get_uint32(settings, FreeRDP_ProxyType))
-	{
-		case PROXY_TYPE_NONE:
-		case PROXY_TYPE_IGNORE:
-			return TRUE;
+	const UINT32 proxyType = freerdp_settings_get_uint32(settings, FreeRDP_ProxyType);
+	if ((proxyType == PROXY_TYPE_NONE) || (proxyType == PROXY_TYPE_IGNORE))
+		return bio;
 
-		case PROXY_TYPE_HTTP:
-			return http_proxy_connect(context, bufferedBio, proxyUsername, proxyPassword, hostname,
-			                          port);
-
-		case PROXY_TYPE_SOCKS:
-			return socks_proxy_connect(context, bufferedBio, proxyUsername, proxyPassword, hostname,
-			                           port);
-
-		default:
-			WLog_ERR(TAG, "Invalid internal proxy configuration");
-			return FALSE;
-	}
-}
-
-WINPR_ATTR_NODISCARD
-static const char* get_response_header(char* response)
-{
-	char* current_pos = strchr(response, '\r');
-	if (!current_pos)
-		current_pos = strchr(response, '\n');
-
-	if (current_pos)
-		*current_pos = '\0';
-
-	return response;
-}
-
-static BOOL http_proxy_write_hostname(wStream* s, const char* hostname, size_t len)
-{
-	const BOOL isIPv6 = is_ipv6_addr(hostname, len);
-
-	if (isIPv6)
-	{
-		if (!Stream_EnsureRemainingCapacity(s, 1))
-			return FALSE;
-		Stream_Write_UINT8(s, '[');
-	}
-
-	if (!Stream_EnsureRemainingCapacity(s, len))
-		return FALSE;
-	Stream_Write(s, hostname, len);
-
-	if (isIPv6)
-	{
-		if (!Stream_EnsureRemainingCapacity(s, 1))
-			return FALSE;
-		Stream_Write_UINT8(s, ']');
-	}
-
-	return TRUE;
-}
-
-WINPR_ATTR_NODISCARD
-static BOOL http_proxy_connect(rdpContext* context, BIO* bufferedBio, const char* proxyUsername,
-                               const char* proxyPassword, const char* hostname, UINT16 port)
-{
-	BOOL rc = FALSE;
-	int status = 0;
-	char port_str[10] = WINPR_C_ARRAY_INIT;
-	char recv_buf[256] = WINPR_C_ARRAY_INIT;
-	char* eol = nullptr;
-	size_t resultsize = 0;
-	const char connect[] = "CONNECT ";
-	const char httpheader[] = " HTTP/1.1" CRLF "Host: ";
-
-	WINPR_ASSERT(context);
-	WINPR_ASSERT(bufferedBio);
-	WINPR_ASSERT(hostname);
-	const UINT32 timeout =
-	    freerdp_settings_get_uint32(context->settings, FreeRDP_TcpConnectTimeout);
-
-	// Check for IPv6 (max 45) or DNS (max 255) name. Bounded length to 256 so too long hostnames do
-	// not silently pass
-	const size_t hostLen = strnlen(hostname, 255 + 1);
-	if (!is_ipv6_addr(hostname, hostLen) && !winpr_str_is_valid_hostnameN(hostname, hostLen))
-		return FALSE;
-
-	if (_itoa_s(port, port_str, sizeof(port_str), 10) < 0)
-	{
-		WLog_ERR(TAG, "itoa %s failed", port_str);
-		return FALSE;
-	}
-
-	const size_t portLen = strnlen(port_str, sizeof(port_str));
-	wStream* s = Stream_New(nullptr, 1024);
-	if (!s)
-		goto fail;
-
-	const size_t clen = strnlen(connect, sizeof(connect));
-	if (!Stream_EnsureRemainingCapacity(s, clen))
-		goto fail;
-	Stream_Write(s, connect, clen);
-
-	if (!http_proxy_write_hostname(s, hostname, hostLen))
-		goto fail;
-
-	if (!Stream_EnsureRemainingCapacity(s, 1))
-		goto fail;
-	Stream_Write_UINT8(s, ':');
-
-	if (!Stream_EnsureRemainingCapacity(s, portLen))
-		goto fail;
-	Stream_Write(s, port_str, portLen);
-
-	const size_t httplen = strnlen(httpheader, sizeof(httpheader));
-	if (!Stream_EnsureRemainingCapacity(s, httplen))
-		goto fail;
-	Stream_Write(s, httpheader, httplen);
-
-	if (!http_proxy_write_hostname(s, hostname, hostLen))
-		goto fail;
-
-	if (!Stream_EnsureRemainingCapacity(s, 1))
-		goto fail;
-	Stream_Write_UINT8(s, ':');
-
-	if (!Stream_EnsureRemainingCapacity(s, portLen))
-		goto fail;
-	Stream_Write(s, port_str, portLen);
-
-	if (proxyUsername && proxyPassword && (strnlen(proxyUsername, 1) > 0) &&
-	    (strnlen(proxyPassword, 1) > 0))
-	{
-		const char basic[] = CRLF "Proxy-Authorization: Basic ";
-		const size_t balen = strnlen(basic, sizeof(basic));
-		if (!Stream_EnsureRemainingCapacity(s, balen))
-			goto fail;
-		Stream_Write(s, basic, balen);
-
-		char* creds = nullptr;
-		size_t size = 0;
-		(void)winpr_asprintf(&creds, &size, "%s:%s", proxyUsername, proxyPassword);
-		if (!creds || (size < 1))
-		{
-			free(creds);
-			goto fail;
-		}
-		size_t b64len = 0;
-		char* base64 = crypto_base64_encode_len(creds, size, &b64len);
-		free(creds);
-		if (!base64 || !Stream_EnsureRemainingCapacity(s, b64len))
-		{
-			free(base64);
-			goto fail;
-		}
-
-		Stream_Write(s, base64, strlen(base64));
-		free(base64);
-	}
-
-	if (!Stream_EnsureRemainingCapacity(s, 4))
-		goto fail;
-
-	Stream_Write(s, CRLF CRLF, 4);
-	ERR_clear_error();
-
-	{
-		const size_t pos = Stream_GetPosition(s);
-		if (pos > INT32_MAX)
-			goto fail;
-
-		status = BIO_write(bufferedBio, Stream_Buffer(s), WINPR_ASSERTING_INT_CAST(int, pos));
-	}
-
-	if ((status < 0) || ((size_t)status != Stream_GetPosition(s)))
-	{
-		WLog_ERR(TAG, "HTTP proxy: failed to write CONNECT request");
-		goto fail;
-	}
-
-	/* Read result until CR-LF-CR-LF.
-	 * Keep recv_buf a null-terminated string. */
-	{
-		const UINT64 start = GetTickCount64();
-		while (strstr(recv_buf, CRLF CRLF) == nullptr)
-		{
-			if (resultsize >= sizeof(recv_buf) - 1)
-			{
-				WLog_ERR(TAG, "HTTP Reply headers too long: %s", get_response_header(recv_buf));
-				goto fail;
-			}
-			const size_t rdsize = sizeof(recv_buf) - resultsize - 1ULL;
-
-			ERR_clear_error();
-
-			WINPR_ASSERT(rdsize <= INT32_MAX);
-			status = BIO_read(bufferedBio, (BYTE*)recv_buf + resultsize, (int)rdsize);
-
-			if (status < 0)
-			{
-				/* Error? */
-				if (!freerdp_shall_disconnect_context(context) && BIO_should_retry(bufferedBio))
-				{
-					USleep(100);
-					continue;
-				}
-
-				WLog_ERR(TAG, "Failed reading reply from HTTP proxy (Status %d)", status);
-				goto fail;
-			}
-			else if (status == 0)
-			{
-				const UINT64 now = GetTickCount64();
-				const UINT64 diff = now - start;
-				if (freerdp_shall_disconnect_context(context) || (now < start) || (diff > timeout))
-				{
-					/* Error? */
-					WLog_ERR(TAG, "Failed reading reply from HTTP proxy (BIO_read returned zero)");
-					goto fail;
-				}
-				Sleep(10);
-			}
-
-			resultsize += WINPR_ASSERTING_INT_CAST(size_t, status);
-		}
-	}
-
-	/* Extract HTTP status line */
-	eol = strchr(recv_buf, '\r');
-
-	if (!eol)
-	{
-		/* should never happen */
-		goto fail;
-	}
-
-	*eol = '\0';
-	WLog_INFO(TAG, "HTTP Proxy: %s", recv_buf);
-
-	if (strnlen(recv_buf, sizeof(recv_buf)) < 12)
-		goto fail;
-
-	recv_buf[7] = 'X';
-
-	if (strncmp(recv_buf, "HTTP/1.X 200", 12) != 0)
-		goto fail;
-
-	rc = TRUE;
-fail:
-	WLog_ERR(TAG, "Failed to connect to proxy");
-	Stream_Free(s, TRUE);
-	return rc;
-}
-
-WINPR_ATTR_NODISCARD
-static int recv_socks_reply(rdpContext* context, BIO* bufferedBio, BYTE* buf, int len, char* reason,
-                            BYTE checkVer)
-{
-	int status = 0;
-
-	WINPR_ASSERT(context);
-
-	const UINT32 timeout =
-	    freerdp_settings_get_uint32(context->settings, FreeRDP_TcpConnectTimeout);
-	const UINT64 start = GetTickCount64();
-	for (;;)
-	{
-		ERR_clear_error();
-		status = BIO_read(bufferedBio, buf, len);
-
-		if (status > 0)
-		{
-			break;
-		}
-		else if (status < 0)
-		{
-			/* Error? */
-			if (!freerdp_shall_disconnect_context(context) && BIO_should_retry(bufferedBio))
-			{
-				USleep(100);
-				continue;
-			}
-
-			WLog_ERR(TAG, "Failed reading %s reply from SOCKS proxy (Status %d)", reason, status);
-			return -1;
-		}
-		else if (status == 0)
-		{
-			const UINT64 now = GetTickCount64();
-			const UINT64 diff = now - start;
-			if (freerdp_shall_disconnect_context(context) || (now < start) || (diff > timeout))
-			{
-				/* Error? */
-				WLog_ERR(TAG, "Failed reading %s reply from SOCKS proxy (BIO_read returned zero)",
-				         reason);
-				return status;
-			}
-			Sleep(10);
-		}
-		else // if (status == 0)
-		{
-			/* Error? */
-			WLog_ERR(TAG, "Failed reading %s reply from SOCKS proxy (BIO_read returned zero)",
-			         reason);
-			return -1;
-		}
-	}
-
-	if (status < 2)
-	{
-		WLog_ERR(TAG, "SOCKS Proxy reply packet too short (%s)", reason);
-		return -1;
-	}
-
-	if (buf[0] != checkVer)
-	{
-		WLog_ERR(TAG, "SOCKS Proxy version is not 5 (%s)", reason);
-		return -1;
-	}
-
-	return status;
-}
-
-WINPR_ATTR_NODISCARD
-static BOOL socks_proxy_userpass(rdpContext* context, BIO* bufferedBio, const char* proxyUsername,
-                                 const char* proxyPassword)
-{
-	WINPR_ASSERT(context);
-	WINPR_ASSERT(bufferedBio);
-
-	if (!proxyUsername || !proxyPassword)
-	{
-		WLog_ERR(TAG, "%s invalid username (%p) or password (%p)", logprefix,
-		         WINPR_CXX_COMPAT_CAST(const void*, proxyUsername),
-		         WINPR_CXX_COMPAT_CAST(const void*, proxyPassword));
-		return FALSE;
-	}
-
-	const size_t usernameLen = (BYTE)strnlen(proxyUsername, 256);
-	if (usernameLen > 255)
-	{
-		WLog_ERR(TAG, "%s username too long (%" PRIuz ", max=255)", logprefix, usernameLen);
-		return FALSE;
-	}
-
-	const size_t userpassLen = (BYTE)strnlen(proxyPassword, 256);
-	if (userpassLen > 255)
-	{
-		WLog_ERR(TAG, "%s password too long (%" PRIuz ", max=255)", logprefix, userpassLen);
-		return FALSE;
-	}
-
-	/* user/password v1 method */
-	{
-		BYTE buf[2 * 255 + 3] = WINPR_C_ARRAY_INIT;
-		size_t offset = 0;
-		buf[offset++] = 1;
-
-		buf[offset++] = WINPR_ASSERTING_INT_CAST(uint8_t, usernameLen);
-		memcpy(&buf[offset], proxyUsername, usernameLen);
-		offset += usernameLen;
-
-		buf[offset++] = WINPR_ASSERTING_INT_CAST(uint8_t, userpassLen);
-		memcpy(&buf[offset], proxyPassword, userpassLen);
-		offset += userpassLen;
-
-		ERR_clear_error();
-		const int ioffset = WINPR_ASSERTING_INT_CAST(int, offset);
-		const int status = BIO_write(bufferedBio, buf, ioffset);
-
-		if (status != ioffset)
-		{
-			WLog_ERR(TAG, "%s error writing user/password request", logprefix);
-			return FALSE;
-		}
-	}
-
-	BYTE buf[2] = WINPR_C_ARRAY_INIT;
-	const int status = recv_socks_reply(context, bufferedBio, buf, sizeof(buf), "AUTH REQ", 1);
-
-	if (status < 2)
-		return FALSE;
-
-	if (buf[1] != 0x00)
-	{
-		WLog_ERR(TAG, "%s invalid user/password", logprefix);
-		return FALSE;
-	}
-	return TRUE;
-}
-
-WINPR_ATTR_NODISCARD
-static BOOL socks_proxy_connect(rdpContext* context, BIO* bufferedBio, const char* proxyUsername,
-                                const char* proxyPassword, const char* hostname, UINT16 port)
-{
-	WINPR_ASSERT(hostname);
 	// Check for IPv6 (max 45) or DNS (max 255) name. Bounded length to 256 so too long hostnames do
 	// not silently pass
 	const size_t hostnlen = strnlen(hostname, 255 + 1);
 	if (!is_ipv6_addr(hostname, hostnlen) && !winpr_str_is_valid_hostnameN(hostname, hostnlen))
-		return FALSE;
+		return nullptr;
 
-	BYTE nauthMethods = 1;
+	BIO* proxy = proxy_bio_new(proxyType, proxyUsername, proxyPassword, hostname, port);
+	if (!proxy)
+		return nullptr;
+	BIO* top = BIO_push(proxy, bio);
 
-	if (proxyUsername || proxyPassword)
-		nauthMethods++;
-
-	/* select auth. method */
+	const UINT32 timeout = freerdp_settings_get_uint32(settings, FreeRDP_TcpConnectTimeout);
+	const UINT64 start = GetTickCount64();
+	while (!freerdp_shall_disconnect_context(context))
 	{
-		const BYTE buf[] = { 5,            /* SOCKS version */
-			                 nauthMethods, /* #of methods offered */
-			                 AUTH_M_NO_AUTH, AUTH_M_USR_PASS };
-
-		size_t writeLen = sizeof(buf);
-		if (nauthMethods <= 1)
-			writeLen--;
-
 		ERR_clear_error();
-		const int iwriteLen = WINPR_ASSERTING_INT_CAST(int, writeLen);
-		const int status = BIO_write(bufferedBio, buf, iwriteLen);
+		if (BIO_do_connect(top) == 1)
+			return top;
+		if (!BIO_should_retry(top))
+			break;
 
-		if (status != iwriteLen)
+		const UINT64 elapsed = GetTickCount64() - start;
+		if (elapsed > timeout)
 		{
-			WLog_ERR(TAG, "%s SOCKS proxy: failed to write AUTH METHOD request", logprefix);
-			return FALSE;
+			WLog_ERR(TAG, "timed out waiting for the proxy");
+			break;
 		}
+
+		const long waitMs = (long)MIN(100, timeout - elapsed + 1);
+		const long rc =
+		    BIO_should_read(top) ? BIO_wait_read(bio, waitMs) : BIO_wait_write(bio, waitMs);
+		if (rc < 0)
+			Sleep(1); /* the BIO cannot wait, poll */
 	}
 
-	{
-		BYTE buf[2] = WINPR_C_ARRAY_INIT;
-		const int status = recv_socks_reply(context, bufferedBio, buf, sizeof(buf), "AUTH REQ", 5);
-
-		if (status <= 0)
-			return FALSE;
-
-		switch (buf[1])
-		{
-			case AUTH_M_NO_AUTH:
-				WLog_DBG(TAG, "%s (NO AUTH) method was selected", logprefix);
-				break;
-
-			case AUTH_M_USR_PASS:
-				if (nauthMethods < 2)
-				{
-					WLog_ERR(TAG, "%s USER/PASS method was not proposed to server", logprefix);
-					return FALSE;
-				}
-				if (!socks_proxy_userpass(context, bufferedBio, proxyUsername, proxyPassword))
-					return FALSE;
-				break;
-
-			default:
-				WLog_ERR(TAG, "%s unknown method 0x%x was selected by proxy", logprefix, buf[1]);
-				return FALSE;
-		}
-	}
-	/* CONN request */
-	{
-		BYTE buf[262] = WINPR_C_ARRAY_INIT;
-		size_t offset = 0;
-		buf[offset++] = 5;                 /* SOCKS version */
-		buf[offset++] = SOCKS_CMD_CONNECT; /* command */
-		buf[offset++] = 0;                 /* 3rd octet is reserved x00 */
-
-		if (inet_pton(AF_INET6, hostname, &buf[offset + 1]) == 1)
-		{
-			buf[offset++] = SOCKS_ADDR_IPV6;
-			offset += 16;
-		}
-		else if (inet_pton(AF_INET, hostname, &buf[offset + 1]) == 1)
-		{
-			buf[offset++] = SOCKS_ADDR_IPV4;
-			offset += 4;
-		}
-		else
-		{
-			buf[offset++] = SOCKS_ADDR_FQDN;
-			buf[offset++] = WINPR_ASSERTING_INT_CAST(uint8_t, hostnlen);
-			memcpy(&buf[offset], hostname, hostnlen);
-			offset += hostnlen;
-		}
-
-		if (offset > sizeof(buf) - 2)
-		{
-			WLog_ERR(TAG, "Invalid offset %" PRIuz, offset);
-			return FALSE;
-		}
-
-		/* follows DST.PORT in netw. format */
-		buf[offset++] = (port >> 8) & 0xff;
-		buf[offset++] = port & 0xff;
-
-		ERR_clear_error();
-		const int ioffset = WINPR_ASSERTING_INT_CAST(int, offset);
-		const int status = BIO_write(bufferedBio, buf, ioffset);
-
-		if ((status < 0) || (status != ioffset))
-		{
-			WLog_ERR(TAG, "%s SOCKS proxy: failed to write CONN REQ", logprefix);
-			return FALSE;
-		}
-	}
-
-	BYTE buf[255] = WINPR_C_ARRAY_INIT;
-	const int status = recv_socks_reply(context, bufferedBio, buf, sizeof(buf), "CONN REQ", 5);
-
-	if (status < 4)
-		return FALSE;
-
-	if (buf[1] == 0)
-	{
-		WLog_INFO(TAG, "Successfully connected to %s:%" PRIu16, hostname, port);
-		return TRUE;
-	}
-
-	if ((buf[1] > 0) && (buf[1] < 9))
-		WLog_INFO(TAG, "SOCKS Proxy replied: %s", rplstat[buf[1]]);
-	else
-		WLog_INFO(TAG, "SOCKS Proxy replied: %" PRIu8 " status not listed in rfc1928", buf[1]);
-
-	return FALSE;
+	WLog_ERR(TAG, "Failed to connect to %s:%" PRIu16 " through the proxy", hostname, port);
+	(void)BIO_pop(proxy);
+	BIO_free(proxy);
+	return nullptr;
 }

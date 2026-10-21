@@ -271,12 +271,14 @@ static BOOL wst_tls_connect(rdpWst* wst, rdpTls* tls, UINT32 timeout)
 
 	if (isProxyConnection)
 	{
-		if (!proxy_connect(wst->context, bufferedBio, proxyUsername, proxyPassword, wst->gwhostname,
-		                   wst->gwport))
+		BIO* bio = proxy_connect(wst->context, bufferedBio, proxyUsername, proxyPassword,
+		                         wst->gwhostname, wst->gwport);
+		if (!bio)
 		{
 			BIO_free_all(bufferedBio);
 			return FALSE;
 		}
+		bufferedBio = bio;
 	}
 
 	if (!status)

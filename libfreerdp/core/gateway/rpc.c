@@ -759,12 +759,14 @@ static BOOL rpc_channel_tls_connect(RpcChannel* channel, UINT32 timeout)
 	if (channel->client->isProxy)
 	{
 		WINPR_ASSERT(settings->GatewayPort <= UINT16_MAX);
-		if (!proxy_connect(context, bufferedBio, proxyUsername, proxyPassword,
-		                   settings->GatewayHostname, (UINT16)settings->GatewayPort))
+		BIO* bio = proxy_connect(context, bufferedBio, proxyUsername, proxyPassword,
+		                         settings->GatewayHostname, (UINT16)settings->GatewayPort);
+		if (!bio)
 		{
 			BIO_free_all(bufferedBio);
 			return FALSE;
 		}
+		bufferedBio = bio;
 	}
 
 	channel->bio = bufferedBio;

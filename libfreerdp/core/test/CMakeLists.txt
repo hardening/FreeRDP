@@ -10,7 +10,7 @@ set(DRIVER ${MODULE_NAME}.c)
 set(TESTS TestVersion.c TestSettings.c TestUtils.c)
 
 if(BUILD_TESTING_INTERNAL)
-  list(APPEND TESTS TestStreamDump.c TestRdstls.c TestServerChannels.c)
+  list(APPEND TESTS TestStreamDump.c TestRdstls.c TestServerChannels.c TestProxyBio.c)
   if(WITH_RDPEUDP)
     list(APPEND TESTS TestRdpUdp.c)
   endif()
@@ -51,6 +51,10 @@ add_compile_definitions(TESTING_SRC_DIRECTORY="${PROJECT_SOURCE_DIR}")
 # TestCore does not call winpr-tools APIs. The link was added with
 # TestFuzzServer's on-the-fly cert generation and broke -DWITH_WINPR_TOOLS=OFF.
 target_link_libraries(${MODULE_NAME} PRIVATE freerdp-client)
+if(BUILD_TESTING_INTERNAL)
+  # TestProxyBio drives the OpenSSL BIOs itself
+  target_link_libraries(${MODULE_NAME} PRIVATE ${OPENSSL_LIBRARIES})
+endif()
 set(CORE_FUZZER_LIBS freerdp-client ${OPENSSL_LIBRARIES})
 if(WITH_WINPR_TOOLS)
   list(APPEND CORE_FUZZER_LIBS winpr-tools)

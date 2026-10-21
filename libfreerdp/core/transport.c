@@ -654,9 +654,11 @@ BOOL transport_connect(rdpTransport* transport, const char* hostname, UINT16 por
 
 		if (isProxyConnection)
 		{
-			if (!proxy_connect(context, transport->frontBio, proxyUsername, proxyPassword, hostname,
-			                   port))
+			BIO* bio = proxy_connect(context, transport->frontBio, proxyUsername, proxyPassword,
+			                         hostname, port);
+			if (!bio)
 				return FALSE;
+			transport->frontBio = bio;
 		}
 
 		status = TRUE;

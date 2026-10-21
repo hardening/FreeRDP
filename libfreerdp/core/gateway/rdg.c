@@ -1427,12 +1427,14 @@ static BOOL rdg_tls_connect(rdpRdg* rdg, rdpTls* tls, const char* peerAddress, U
 
 	if (isProxyConnection)
 	{
-		if (!proxy_connect(rdg->context, bufferedBio, proxyUsername, proxyPassword,
-		                   settings->GatewayHostname, (UINT16)settings->GatewayPort))
+		BIO* bio = proxy_connect(rdg->context, bufferedBio, proxyUsername, proxyPassword,
+		                         settings->GatewayHostname, (UINT16)settings->GatewayPort);
+		if (!bio)
 		{
 			BIO_free_all(bufferedBio);
 			return FALSE;
 		}
+		bufferedBio = bio;
 	}
 
 	if (!status)
